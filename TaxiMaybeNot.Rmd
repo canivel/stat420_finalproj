@@ -1,0 +1,39 @@
+---
+title: "Final Project Proposal"
+author: "Danilo Canivel, Joel Zou, Danny Breyfogle"
+date: "7/15/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Group Introduction
+
+This study will be conducted by the following students of Stat420 Summer 2019:
+
+ - Danilo Canivel (NetID: canivel2)
+ - Joel Zou (NetID: joelzou2)
+ - Danny Breyfogle(NetID: dwb4)
+
+## Title
+
+Let's call a Taxi... Maybe not.
+
+## Dataset
+
+For this project we will be predicting the fare amount (inclusive of tolls) for a taxi ride in New York City given the pickup and dropoff locations. We are gonna set a prelimirar objective of trying to reach a RMSE < $2 but a RMSE < 2.88 can be considered acceptable.
+After predicting we are going to compare with the Uber estimate API and deliver both results to the customer in a simple Web interface for decision.
+
+The dataset can be found at: https://www.kaggle.com/c/new-york-city-taxi-fare-prediction/data
+
+The Uber API can be found here:
+https://developer.uber.com/docs/riders/references/api/v1.2/estimates-price-get
+
+```{r}
+taxi_data = read.csv("input/train.csv", nrows=100000)
+head(taxi_data)
+```
+
+
