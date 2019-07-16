@@ -23,7 +23,10 @@ Let's call a Taxi... Maybe not.
 
 ## Dataset
 
-For this project we will be predicting the fare amount (inclusive of tolls) for a taxi ride in New York City given the pickup and dropoff locations. We are gonna set a prelimirar objective of trying to reach a RMSE < $2 but a RMSE < 2.88 can be considered acceptable.
+For this project we will be predicting the fare amount (inclusive of tolls) for a taxi ride in New York City given the pickup and dropoff locations. 
+This dataset has 6 features: pickup_datetime(datetime), pickup_longitude(numeric), pickup_latitude(numeric), dropoff_longitude(numeric), dropoff_latitude(numeric) and passenger counts(numeric), with about 55 million observations in the training set. In order to satisfy the project requirement of at least one categorical predictor, we can transform the pickup_datetime feature into various categorical variables such as day of the week, morning, after, evening, etc. that would potentially be helpful in determining the fare amount. 
+
+We are gonna set a preliminary objective of trying to reach a $RMSE < 2$ but a $RMSE < 2.88$ can be considered acceptable.
 After predicting we are going to compare with the Uber estimate API and deliver both results to the customer in a simple Web interface for decision.
 
 The dataset can be found at: https://www.kaggle.com/c/new-york-city-taxi-fare-prediction/data
