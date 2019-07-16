@@ -255,7 +255,9 @@ h6 {
 </style>
 
 
+</head>
 
+<body>
 
 <style type="text/css">
 .main-container {
@@ -286,6 +288,8 @@ summary {
 </style>
 
 
+
+<div class="container-fluid main-container">
 
 <!-- tabsets -->
 
@@ -360,23 +364,14 @@ $(document).ready(function () {
 
 
 
-</head>
-
-<body>
-
-
-<div class="container-fluid main-container">
-
-
-
 
 <div class="fluid-row" id="header">
 
 
 
 <h1 class="title toc-ignore">Final Project Proposal</h1>
-<h4 class="author">Danilo Canivel, Joel Zou, Danny Breyfogle</h4>
-<h4 class="date">7/15/2019</h4>
+<h4 class="author"><em>Danilo Canivel, Joel Zou, Danny Breyfogle</em></h4>
+<h4 class="date"><em>7/15/2019</em></h4>
 
 </div>
 
@@ -405,8 +400,8 @@ $(document).ready(function () {
 <li><code>dropoff_latitude</code> (numeric)</li>
 <li><code>passenger counts</code> (numeric)</li>
 </ul>
-<p>We will be predicting <code>fare_amount</code>, fitting on a training set, and predicting on a test set.</p>
-<p>There are about 55 million observations in the training set. This is a very large dataset, so we may need to use a subset to meet computing requirements. In order to satisfy the project requirement of at least one categorical predictor, we can transform the <code>pickup_datetime</code> feature into various categorical variables such as day of the week, morning, after, evening, etc. that would potentially be helpful in determining the fare amount.</p>
+<p>We will be predicting the numeric response <code>fare_amount</code>, fitting on a training set, and predicting on a test set.</p>
+<p>There are about 55 million observations in the training set. This is a very large dataset, so we may need to use a subset to meet computing requirements. In order to satisfy the project requirement of at least one categorical predictor, we can transform the <code>pickup_datetime</code> feature into categorical variables that would potentially be helpful in determining the fare amount, some examples would be day of the week, morning, afternoon, evening, etc.</p>
 <p>We are going to set a preliminary objective of trying to reach a <span class="math inline">\(RMSE &lt; 2\)</span> but a <span class="math inline">\(RMSE &lt; 2.88\)</span> can be considered acceptable. After predicting, we are going to compare with the Uber estimate API and deliver both results to the customer in a simple Web interface for decision.</p>
 <p>The dataset can be found at: <a href>https://www.kaggle.com/c/new-york-city-taxi-fare-prediction/data</a></p>
 <p>The Uber API can be found here: <a href>https://developer.uber.com/docs/riders/references/api/v1.2/estimates-price-get</a></p>
