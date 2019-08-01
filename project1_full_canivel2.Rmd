@@ -20,9 +20,9 @@ library(cluster)
 ## Read Data
 
 ```{r}
-nrows = 100000
-data = read.csv("./input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
-inds = sample.int(nrow(data), size=nrow(data) * 0.8) 
+#nrows = 100000
+data = read.csv("./input/train.csv", stringsAsFactors=FALSE)
+inds = sample.int(nrow(data), size=nrow(data) * 0.9) 
 train = data[inds,]
 test = data[-inds,]
 head(train)
@@ -288,55 +288,8 @@ calc_rmse = function(model) {
 ## Multiple Linear Regression
 
 ```{r}
-m_additive = lm(fare_amount ~ dists + passenger_count + pickup_location + dropoff_location 
-                + year + month + weekday + time, train)
-```
-
-```{r}
-m_interactions = lm(fare_amount ~ (dists + passenger_count + pickup_location + dropoff_location 
-                                   + year + month + weekday + time)^2, train)
-```
-
-```{r}
-m_interactions2 = lm(fare_amount ~ (dists + passenger_count:weekday + pickup_location:dropoff_location 
-                                   + year + month + weekday + time)^2, train)
-```
-
-```{r}
-m_interactions3 = lm(fare_amount ~ dists + year + month + weekday + time + dists:year + 
-    dists:month + dists:weekday + dists:time + weekday:passenger_count + 
-    pickup_location:dropoff_location + year:month + year:weekday + 
-    year:time + month:weekday + month:time + weekday:time + dists:weekday:passenger_count + 
-    dists:pickup_location:dropoff_location + year:weekday:passenger_count + 
-    month:weekday:passenger_count + weekday:time:passenger_count + 
-    year:pickup_location:dropoff_location + weekday:pickup_location:dropoff_location + 
-    time:pickup_location:dropoff_location, train)
-```
-
-
-```{r}
-calc_rmse(m_additive)
-calc_rmse(m_interactions)
-calc_rmse(m_interactions2)
-```
-
-```{r}
-calc_rmse(m_interactions2_mod_back_bic)
-```
-
-
-```{r}
-anova(m_interactions, m_additive)
-```
-
-```{r}
-anova(m_additive, m_interactions3)
-```
-
-
-```{r}
-n = length(resid(m_interactions))
-m_interactions2_mod_back_bic = step(m_interactions, direction = "backward", k = log(n))
+#found from steps on subset 100k
+m_interactions2_mod_back_bic = lm(formula = fare_amount ~ dists + passenger_count + pickup_location + dropoff_location + year + month + weekday + time + dists:year + dists:time + pickup_location:dropoff_location + dropoff_location:time + weekday:time, data = train)
 ```
 
 ```{r}
@@ -368,8 +321,6 @@ get_bp_decision = function(model, alpha) {
 
 
 ```{r}
-get_bp_decision(m_additive, alpha = 0.01)
-get_bp_decision(m_interactions2, alpha = 0.01)
 get_bp_decision(m_interactions2_mod_back_bic, alpha = 0.01)
 
 ```
@@ -377,7 +328,58 @@ get_bp_decision(m_interactions2_mod_back_bic, alpha = 0.01)
 ## Residual Diagnosis
 
 ```{r}
-calc_rmse(m_additive)
-calc_rmse(m_interactions2)
 calc_rmse(m_interactions2_mod_back_bic)
 ```
+
+```{r}
+save(m_interactions2_mod_back_bic, file = "lm_interactions2_mod_back_bic.rda")
+```
+
+## kaggle submission
+
+```{r}
+
+test_data = read.csv("./input/test.csv", stringsAsFactors=FALSE)
+test_data$pickup_datetime = as_datetime(test_data$pickup_datetime, tz="UTC")
+test_data$year = as.factor(year(test_data$pickup_datetime))
+test_data$month = as.factor(month(test_data$pickup_datetime))
+test_data$weekday = as.factor(weekdays(test_data$pickup_datetime))
+```
+
+
+```{r}
+hour = hour(test_data$pickup_datetime)
+test_data$time = as.factor(ifelse(hour >= 6 & hour < 12, "Morning", 
+                              ifelse(hour >= 12 & hour < 17, "Afternoon",
+                              ifelse(hour >= 17 & hour < 21, "Evening", "Night"))))
+```
+
+```{r}
+dists = apply(centers, 1, function(x) {
+  (test_data$pickup_longitude - x[1])^2 + (test_data$pickup_latitude - x[2])^2
+})
+test_data["pickup_location"] = apply(dists, 1, which.min)
+test_data$pickup_location = as.factor(test_data$pickup_location)
+
+dists = apply(centers, 1, function(x) {
+  (test_data$dropoff_longitude - x[1])^2 + (test_data$dropoff_latitude - x[2])^2
+})
+test_data["dropoff_location"] = apply(dists, 1, which.min)
+test_data$dropoff_location = as.factor(test_data$dropoff_location)
+
+test_data$dists = sqrt((test_data$pickup_longitude - test_data$dropoff_longitude)^2 + (test_data$pickup_latitude - test_data$dropoff_latitude)^2)
+```
+
+```{r}
+write.csv(x = test_data, file="input/test_eng.csv")
+```
+
+
+```{r}
+library(magrittr)
+library(dplyr)
+read.csv("input/sample_submission.csv")%>%
+  mutate(fare_amount = predict(m_interactions2_mod_back_bic, test_data))%>%
+  write.csv("lm_sub_v1.csv", row.names = F)
+```
+
