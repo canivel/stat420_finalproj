@@ -195,7 +195,7 @@ xgb.importance(colnames(dtrain), model = m_xgb)
 ```
 
 ```{r}
-save(m_xgb, file = "m_xgb")
+save(m_xgb, file = "m_xgb.rda")
 ```
 
 
@@ -204,6 +204,6 @@ save(m_xgb, file = "m_xgb")
 cat("Making submission file...\n")
 
 read.csv("./input/sample_submission.csv") %>%  
-  mutate(fare_amount = predict(m_additive2, data.matrix(test_kaggle[,-1]))) %>%
+  mutate(fare_amount = predict(m_xgb, data.matrix(test_kaggle))) %>%
   write_csv("sub_xgb_1.csv")
 ```
