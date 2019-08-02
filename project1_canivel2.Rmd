@@ -10,277 +10,112 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-```{r}
+```{r eval=FALSE}
 library(lubridate)
 library(cluster)
+library(tidyverse)
+library(caret)
+library(magrittr)
+library(Matrix)
 ```
-
 
 
 ## Read Data
 
 ```{r}
-nrows = 100000
+nrows = 1000000
 data = read.csv("./input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
-inds = sample.int(nrow(data), size=nrow(data) * 0.8) 
-train = data[inds,]
-test = data[-inds,]
-head(train)
 ```
-
-
-
-
-```{r}
-train$pickup_datetime = as_datetime(train$pickup_datetime, tz="UTC")
-test$pickup_datetime = as_datetime(test$pickup_datetime, tz="UTC")
-```
-
-## Clean Data
-
-```{r}
-summary(train)
-```
-
-### Missing Values
-```{r}
-train = na.omit(train)
-test = na.omit(test)
-```
-
-
-### Negative Fare and No Passenger
-
-```{r}
-train = train[(train$fare_amount > 0) & (train$passenger_count > 0),]
-test = test[(test$fare_amount > 0) & (test$passenger_count > 0),]
-```
-
-### Outlier Pickup locations 
-
-```{r}
-train = train[train$pickup_longitude < median(train$pickup_longitude) + 1.5 * IQR(train$pickup_longitude) &
-              train$pickup_longitude > median(train$pickup_longitude - 1.5 * IQR(train$pickup_longitude)) &
-              train$pickup_latitude < median(train$pickup_latitude) + 1.5 * IQR(train$pickup_latitude) &
-              train$pickup_latitude > median(train$pickup_latitude) - 1.5 * IQR(train$pickup_latitude),]
-```
-```{r}
-test = test[test$pickup_longitude < median(test$pickup_longitude) + 1.5 * IQR(test$pickup_longitude) &
-              test$pickup_longitude > median(test$pickup_longitude - 1.5 * IQR(test$pickup_longitude)) &
-              test$pickup_latitude < median(test$pickup_latitude) + 1.5 * IQR(test$pickup_latitude) &
-              test$pickup_latitude > median(test$pickup_latitude) - 1.5 * IQR(test$pickup_latitude),]
-```
-
-
-### Outlier Dropoff locations
-
-```{r}
-train = train[train$dropoff_longitude < median(train$dropoff_longitude) + 1.5 * IQR(train$dropoff_longitude) &
-              train$dropoff_longitude > median(train$dropoff_longitude - 1.5 * IQR(train$dropoff_longitude)) &
-              train$dropoff_latitude < median(train$dropoff_latitude) + 1.5 * IQR(train$dropoff_latitude) &
-              train$dropoff_latitude > median(train$dropoff_latitude) - 1.5 * IQR(train$dropoff_latitude),]
-```
-```{r}
-test = test[test$dropoff_longitude < median(test$dropoff_longitude) + 1.5 * IQR(test$dropoff_longitude) &
-              test$dropoff_longitude > median(test$dropoff_longitude - 1.5 * IQR(test$dropoff_longitude)) &
-              test$dropoff_latitude < median(test$dropoff_latitude) + 1.5 * IQR(test$dropoff_latitude) &
-              test$dropoff_latitude > median(test$dropoff_latitude) - 1.5 * IQR(test$dropoff_latitude),]
-```
-
-
-### Outlier Fare Amount
-
-```{r}
-train = train[train$fare_amount < median(train$fare_amount) + 1.5 * IQR(train$fare_amount),]
-test = test[test$fare_amount < median(test$fare_amount) + 1.5 * IQR(test$fare_amount),]
-```
-
-
 
 ## Feature Engineering
 
-### Year
-
 ```{r}
-train$year = as.factor(year(train$pickup_datetime))
-```
+features_eng = function(data, istrain=TRUE){
+  
+  if(istrain == TRUE){
+    data = data[complete.cases(data),]
+    # Remove Negative Fare and No Passenger
+    data = data[(data$fare_amount > 0) & (data$passenger_count > 0),]
+  }
+  
+  
+  # Convert to datetime obj
+  data$pickup_datetime = as_datetime(data$pickup_datetime, tz="UTC")
 
-
-```{r}
-boxplot(fare_amount ~ year, data=train, col="blue", main="Fare Amount by Year")
-```
-
-```{r}
-m0 = lm(fare_amount ~ 1, train)
-m1 = lm(fare_amount ~ year, train)
-anova(m0, m1)
-```
-
-```{r}
-test$year = as.factor(year(test$pickup_datetime))
-```
-
-
-### Month
-
-```{r}
-train$month = as.factor(month(train$pickup_datetime))
-```
-
-```{r}
-boxplot(fare_amount ~ month, data=train, col="blue", main="Fare Amount by Month")
-```
-
-```{r}
-m0 = lm(fare_amount ~ 1, train)
-m1 = lm(fare_amount ~ month, train)
-anova(m0, m1)
-```
-
-```{r}
-test$month = as.factor(month(test$pickup_datetime))
-```
-
-
-### Day of Week
-
-```{r}
-train$weekday = as.factor(weekdays(train$pickup_datetime))
-```
-
-```{r}
-boxplot(fare_amount ~ weekday, data=train, col="blue", main="Fare Amount by Day of Week")
+  
+  
+  # factorization
+  data$year = as.factor(year(data$pickup_datetime))
+  data$month = as.factor(month(data$pickup_datetime))
+  data$day = as.factor(day(data$pickup_datetime))
+  data$weekday = as.factor(weekdays(data$pickup_datetime))
+  print(dim(data))
+  #factor time of the day
+  hour = hour(data$pickup_datetime)
+  data$time = as.factor(ifelse(hour < 7, "Overnight", 
+                               ifelse(hour < 11, "Morning", 
+                                      ifelse(hour < 16, "Noon",
+                                             ifelse(hour < 20, "Evening",
+                                                    ifelse(hour < 23, "night", "overnight")
+                        )))))
+  print(dim(data))
+  # compare locations
+  data$dlat = data$dropoff_latitude - data$pickup_latitude
+  data$dlon = data$dropoff_longitude - data$pickup_longitude 
+  
+  #Compute haversine distance
+  earth_radius = 6371 #in kms
+  data$hav = sin(data$dlat/2.0)**2 + cos(data$pickup_latitude) * cos(data$dropoff_latitude) * sin(data$dlon/2.0)**2
+  data$haversine = round(x = 2 * earth_radius * asin(sqrt(data$hav)), digits = 4)
+  print(dim(data))
+  #Compute Bearing distance
+  data$dlon = data$pickup_longitude - data$dropoff_longitude
+  data$bearing = atan2(sin(data$dlon * cos(data$dropoff_latitude)), cos(data$pickup_latitude) * sin(data$dropoff_latitude) - sin(data$pickup_latitude) * cos(data$dropoff_latitude) * cos(data$dlon))
+  print(dim(data))
+  return (data)
+  
+}
 ```
 
 ```{r}
-m0 = lm(fare_amount ~ 1, train)
-m1 = lm(fare_amount ~ weekday, train)
-anova(m0, m1)
+data = features_eng(data = data)
 ```
 
 ```{r}
-test$weekday = as.factor(weekdays(test$pickup_datetime))
+### Outlier Pickup locations 
+  data = data[data$pickup_longitude < median(data$pickup_longitude) + 1.5 * IQR( data$pickup_longitude) &
+              data$pickup_longitude > median(data$pickup_longitude - 1.5 * IQR(data$pickup_longitude)) &
+              data$pickup_latitude < median(data$pickup_latitude) + 1.5 * IQR(data$pickup_latitude) &
+              data$pickup_latitude > median(data$pickup_latitude) - 1.5 * IQR(data$pickup_latitude),]
+  print(dim(data))
+  # Outlier Dropoff locations
+  data = data[data$dropoff_longitude < median(data$dropoff_longitude) + 1.5 * IQR(data$dropoff_longitude) &
+              data$dropoff_longitude > median(data$dropoff_longitude - 1.5 * IQR(data$dropoff_longitude)) &
+              data$dropoff_latitude < median(data$dropoff_latitude) + 1.5 * IQR(data$dropoff_latitude) &
+              data$dropoff_latitude > median(data$dropoff_latitude) - 1.5 * IQR(data$dropoff_latitude),]
+  print(dim(data))
+  # Outlier Fare Amount
+  data = data[data$fare_amount < median(data$fare_amount) + 1.5 * IQR(data$fare_amount),]
 ```
 
-
-
-### Time of Day
-
-```{r}
-hour = hour(train$pickup_datetime)
-train$time = as.factor(ifelse(hour >= 6 & hour < 12, "Morning", 
-                              ifelse(hour >= 12 & hour < 17, "Afternoon",
-                              ifelse(hour >= 17 & hour < 21, "Evening", "Night"))))
-```
-
-```{r}
-boxplot(fare_amount ~ time, data=train, col="blue", main="Fare Amount by Time of Day")
-```
-
-```{r}
-m0 = lm(fare_amount ~ 1, train)
-m1 = lm(fare_amount ~ time, train)
-anova(m0, m1)
-```
 
 
 ```{r}
-hour = hour(test$pickup_datetime)
-test$time = as.factor(ifelse(hour >= 6 & hour < 12, "Morning", 
-                              ifelse(hour >= 12 & hour < 17, "Afternoon",
-                              ifelse(hour >= 17 & hour < 21, "Evening", "Night"))))
+inds = sample.int(nrow(data), size=nrow(data) * 0.8) 
+train = data[inds,]
+test = data[-inds,]
+dim(train)
+dim(test)
+head(train)
 ```
-
-### Pick up Locations
-
-```{r}
-pickup_coordinates = train[, c("pickup_longitude", "pickup_latitude")]
-km = kmeans(pickup_coordinates, centers=5)
-centers = km$centers
-train["pickup_location"] = km[1]
-train$pickup_location = as.factor(train$pickup_location)
-```
-
-
-```{r}
-centers[1,]
-```
-
-```{r}
-boxplot(fare_amount ~ pickup_location, data=train, col="blue", main="Fare Amount by Pickup Location")
-```
-
-```{r}
-m0 = lm(fare_amount ~ 1, train)
-m1 = lm(fare_amount ~ pickup_location, train)
-anova(m0, m1)
-```
-
-
-```{r}
-dists = apply(centers, 1, function(x) {
-  (test$pickup_longitude - x[1])^2 + (test$pickup_latitude - x[2])^2
-})
-test["pickup_location"] = apply(dists, 1, which.min)
-test$pickup_location = as.factor(test$pickup_location)
-```
-
-### Drop off Location
-
-```{r}
-dropoff_coordinates = train[, c("dropoff_longitude", "dropoff_latitude")]
-km = kmeans(dropoff_coordinates, centers=5)
-centers = km$centers
-train["dropoff_location"] = km[1]
-train$dropoff_location = as.factor(train$dropoff_location)
-```
-
-
-```{r}
-boxplot(fare_amount ~ dropoff_location, data=train, col="blue", main="Fare Amount by Dropoff Location")
-```
-
-```{r}
-m0 = lm(fare_amount ~ 1, train)
-m1 = lm(fare_amount ~ dropoff_location, train)
-anova(m0, m1)
-```
-
-```{r}
-dists = apply(centers, 1, function(x) {
-  (test$dropoff_longitude - x[1])^2 + (test$dropoff_latitude - x[2])^2
-})
-test["dropoff_location"] = apply(dists, 1, which.min)
-test$dropoff_location = as.factor(test$dropoff_location)
-```
-
-
-### Distance
-
-```{r}
-train$dists = sqrt((train$pickup_longitude - train$dropoff_longitude)^2 + (train$pickup_latitude - train$dropoff_latitude)^2)
-```
-
-
-```{r}
-m0 = lm(fare_amount ~ 1, train)
-m1 = lm(fare_amount ~ dists, train)
-anova(m0, m1)
-```
-
-```{r}
-summary(m1)
-```
-
-
-```{r}
-test$dists = sqrt((test$pickup_longitude - test$dropoff_longitude)^2 + (test$pickup_latitude - test$dropoff_latitude)^2)
-```
-
 
 ```{r}
 calc_rmse = function(model) {
   sqrt(mean((resid(model) / (1 - hatvalues(model))) ^ 2))
+}
+
+calc_rmse2 = function(model, data){
+  sqrt(sum((data$fare_amount - predict(model, newdata=data))^2) / nrow(data))
 }
 ```
 
@@ -288,96 +123,74 @@ calc_rmse = function(model) {
 ## Multiple Linear Regression
 
 ```{r}
-m_additive = lm(fare_amount ~ dists + passenger_count + pickup_location + dropoff_location 
-                + year + month + weekday + time, train)
+m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + passenger_count + year + month + day + weekday + time + dlat + dlon + haversine + bearing, train)
 ```
-
-```{r}
-m_interactions = lm(fare_amount ~ (dists + passenger_count + pickup_location + dropoff_location 
-                                   + year + month + weekday + time)^2, train)
-```
-
-```{r}
-m_interactions2 = lm(fare_amount ~ (dists + passenger_count:weekday + pickup_location:dropoff_location 
-                                   + year + month + weekday + time)^2, train)
-```
-
-```{r}
-m_interactions3 = lm(fare_amount ~ dists + year + month + weekday + time + dists:year + 
-    dists:month + dists:weekday + dists:time + weekday:passenger_count + 
-    pickup_location:dropoff_location + year:month + year:weekday + 
-    year:time + month:weekday + month:time + weekday:time + dists:weekday:passenger_count + 
-    dists:pickup_location:dropoff_location + year:weekday:passenger_count + 
-    month:weekday:passenger_count + weekday:time:passenger_count + 
-    year:pickup_location:dropoff_location + weekday:pickup_location:dropoff_location + 
-    time:pickup_location:dropoff_location, train)
-```
-
 
 ```{r}
 calc_rmse(m_additive)
-calc_rmse(m_interactions)
-calc_rmse(m_interactions2)
+calc_rmse2(m_additive, test)
 ```
 
 ```{r}
-calc_rmse(m_interactions2_mod_back_bic)
-```
-
-
-```{r}
-anova(m_interactions, m_additive)
+n = length(resid(m_additive))
+m_add_mod_back_bic = step(m_additive, direction = "backward", k = log(n))
 ```
 
 ```{r}
-anova(m_additive, m_interactions3)
-```
-
-
-```{r}
-n = length(resid(m_interactions))
-m_interactions2_mod_back_bic = step(m_interactions, direction = "backward", k = log(n))
+m_additive2 = lm(fare_amount ~ dropoff_longitude + year + weekday + time + dlat + 
+    haversine + bearing, train)
 ```
 
 ```{r}
-summary(m_interactions2_mod_back_bic)
+calc_rmse(m_additive2)
+calc_rmse2(m_additive2, test)
 ```
 
-
-### Linearity and Equal Variance
-
 ```{r}
-plot(fitted(m_interactions2_mod_back_bic), resid(m_interactions2_mod_back_bic), main="Residual vs Fitted")
-abline(h=0, col="orange", pch=3)
-```
-```{r}
-qqnorm(resid(m_interactions2_mod_back_bic))
-qqline(resid(m_interactions2_mod_back_bic))
-```
-
-
-```{r}
-
-library(lmtest)
-get_bp_decision = function(model, alpha) {
-  decide = unname(bptest(model)$p.value < alpha)
-  ifelse(decide, "Reject", "Fail to Reject")
-}
+library('faraway')
+round(vif(m_additive), 3)
 
 ```
 
 
 ```{r}
-get_bp_decision(m_additive, alpha = 0.01)
-get_bp_decision(m_interactions2, alpha = 0.01)
-get_bp_decision(m_interactions2_mod_back_bic, alpha = 0.01)
-
+test_kaggle = read.csv("./input/test.csv", stringsAsFactors=FALSE)
+test_kaggle = features_eng(data = test_kaggle, FALSE)
 ```
-
-## Residual Diagnosis
 
 ```{r}
-calc_rmse(m_additive)
-calc_rmse(m_interactions2)
-calc_rmse(m_interactions2_mod_back_bic)
+#---------------------------
+cat("Making submission file...\n")
+
+read.csv("./input/sample_submission.csv") %>%  
+  mutate(fare_amount = predict(m_additive2, test_kaggle)) %>%
+  write_csv("sub_lm_aditive_4.csv")
 ```
+
+```{r}
+library(xgboost)
+target = data$fare_amount
+
+#train = train %>% select (- fare_amount)
+#test = test %>% select (- fare_amount)
+
+dvalid = xgb.DMatrix(data = data.matrix(test), label = data[-inds])
+dtrain = xgb.DMatrix(data = data.matrix(train), label = data[inds])
+
+p = list(objective = "reg:linear",
+          eval_metric = "rmse",
+          max_depth = 8 ,
+          eta = .05, #.05
+          subsample=1,
+          colsample_bytree=0.8,
+          num_boost_round=1000,
+          nrounds = 6000)
+
+set.seed(0)
+m_xgb = xgb.train(p, dtrain, p$nrounds, list(val = dvalid), print_every_n = 10, early_stopping_rounds = 100)
+```
+##XGB Importance
+```{r}
+xgb.importance(colnames(dtrain), model = m_xgb)
+```
+
