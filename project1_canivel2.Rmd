@@ -24,7 +24,7 @@ library(Matrix)
 
 ```{r}
 nrows = 1000000
-data = read.csv("./input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
+fdata = read.csv("./input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
 ```
 
 ## Feature Engineering
@@ -78,32 +78,32 @@ features_eng = function(data, istrain=TRUE){
 ```
 
 ```{r}
-data = features_eng(data = data)
+fdata = features_eng(data = fdata)
 ```
 
 ```{r}
 ### Outlier Pickup locations 
-  data = data[data$pickup_longitude < median(data$pickup_longitude) + 1.5 * IQR( data$pickup_longitude) &
-              data$pickup_longitude > median(data$pickup_longitude - 1.5 * IQR(data$pickup_longitude)) &
-              data$pickup_latitude < median(data$pickup_latitude) + 1.5 * IQR(data$pickup_latitude) &
-              data$pickup_latitude > median(data$pickup_latitude) - 1.5 * IQR(data$pickup_latitude),]
-  print(dim(data))
+  fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
+              fdata$pickup_longitude > median(fdata$pickup_longitude - 1.5 * IQR(fdata$pickup_longitude)) &
+              fdata$pickup_latitude < median(fdata$pickup_latitude) + 1.5 * IQR(fdata$pickup_latitude) &
+              fdata$pickup_latitude > median(fdata$pickup_latitude) - 1.5 * IQR(fdata$pickup_latitude),]
+  print(dim(fdata))
   # Outlier Dropoff locations
-  data = data[data$dropoff_longitude < median(data$dropoff_longitude) + 1.5 * IQR(data$dropoff_longitude) &
-              data$dropoff_longitude > median(data$dropoff_longitude - 1.5 * IQR(data$dropoff_longitude)) &
-              data$dropoff_latitude < median(data$dropoff_latitude) + 1.5 * IQR(data$dropoff_latitude) &
-              data$dropoff_latitude > median(data$dropoff_latitude) - 1.5 * IQR(data$dropoff_latitude),]
-  print(dim(data))
+  fdata = fdata[fdata$dropoff_longitude < median(fdata$dropoff_longitude) + 1.5 * IQR(fdata$dropoff_longitude) &
+              fdata$dropoff_longitude > median(fdata$dropoff_longitude - 1.5 * IQR(fdata$dropoff_longitude)) &
+              fdata$dropoff_latitude < median(fdata$dropoff_latitude) + 1.5 * IQR(fdata$dropoff_latitude) &
+              fdata$dropoff_latitude > median(fdata$dropoff_latitude) - 1.5 * IQR(fdata$dropoff_latitude),]
+  print(dim(fdata))
   # Outlier Fare Amount
-  data = data[data$fare_amount < median(data$fare_amount) + 1.5 * IQR(data$fare_amount),]
+  fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
 ```
 
 
 
 ```{r}
-inds = sample.int(nrow(data), size=nrow(data) * 0.8) 
-train = data[inds,]
-test = data[-inds,]
+inds = sample.int(nrow(fdata), size=nrow(fdata) * 0.8) 
+train = fdata[inds,]
+test = fdata[-inds,]
 dim(train)
 dim(test)
 head(train)
@@ -169,13 +169,13 @@ read.csv("./input/sample_submission.csv") %>%
 
 ```{r}
 library(xgboost)
-target = data$fare_amount
+target = fdata$fare_amount
 
-#train = train %>% select (- fare_amount)
-#test = test %>% select (- fare_amount)
+train = train %>% select (- fare_amount)
+test = test %>% select (- fare_amount)
 
-dvalid = xgb.DMatrix(data = data.matrix(test), label = data[-inds])
-dtrain = xgb.DMatrix(data = data.matrix(train), label = data[inds])
+dvalid = xgb.DMatrix(data = data.matrix(test), label = target[-inds])
+dtrain = xgb.DMatrix(data = data.matrix(train), label = target[inds])
 
 p = list(objective = "reg:linear",
           eval_metric = "rmse",
@@ -194,3 +194,16 @@ m_xgb = xgb.train(p, dtrain, p$nrounds, list(val = dvalid), print_every_n = 10, 
 xgb.importance(colnames(dtrain), model = m_xgb)
 ```
 
+```{r}
+save(m_xgb, file = "m_xgb")
+```
+
+
+```{r}
+#---------------------------
+cat("Making submission file...\n")
+
+read.csv("./input/sample_submission.csv") %>%  
+  mutate(fare_amount = predict(m_additive2, data.matrix(test_kaggle[,-1]))) %>%
+  write_csv("sub_xgb_1.csv")
+```
