@@ -1,0 +1,413 @@
+---
+title: "project v2"
+author: "Danilo Canivel(canivel2)"
+date: "7/31/2019"
+output: html_document
+---
+
+```{r eval=FALSE}
+library(tidyverse)
+library(caret)
+library(magrittr)
+library(Matrix)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+nrows = 200000
+train = read.csv("./input/train.csv",header=TRUE,colClasses=c("key"="character","fare_amount"="numeric","pickup_datetime"="POSIXct", "dropoff_longitude"="numeric","pickup_longitude"="numeric","dropoff_latitude"="numeric","pickup_latitude"="numeric",
+                                                             "passenger_count"="integer"),nrows=nrows) %>% select(-key)
+head(train)
+```
+
+The Earth Radius in km, will be used to calculate haversine distance feature
+[https://en.wikipedia.org/wiki/Haversine_formula]
+
+```{r}
+earth_radius = 6371
+```
+
+```{r}
+#dealing with missing data
+train = train[complete.cases(train),]
+```
+
+```{r}
+dim(train)
+```
+
+
+```{r}
+#features engineering, outliers removals
+train = train %>% 
+  mutate(pickup_datetime = as.POSIXct(pickup_datetime)) %>%
+  mutate(hour = as.numeric(format(pickup_datetime, "%H"))) %>%
+  mutate(min = as.numeric(format(pickup_datetime, "%M"))) %>%   
+  mutate(year = as.factor(format(pickup_datetime, "%Y"))) %>%
+  mutate(day = as.factor(format(pickup_datetime, "%d"))) %>%
+  mutate(month = as.factor(format(pickup_datetime, "%m"))) %>%
+  mutate(Wday = as.factor(weekdays(pickup_datetime))) %>%
+  mutate(hour_class = as.factor(ifelse(hour < 7, "Overnight", 
+                                       ifelse(hour < 11, "Morning", 
+                                              ifelse(hour < 16, "Noon", 
+                                                     ifelse(hour < 20, "Evening",
+                                                            ifelse(hour < 23, "night", "overnight") ) ))))) %>%
+  filter(fare_amount > 0 & fare_amount <= 500) %>%
+  filter(pickup_longitude > -80 && pickup_longitude < -70) %>%
+  filter(pickup_latitude > 35 && pickup_latitude < 45) %>%
+  filter(dropoff_longitude > -80 && dropoff_longitude < -70) %>%
+  filter(dropoff_latitude > 35 && dropoff_latitude < 45) %>%
+  filter(passenger_count > 0 && passenger_count < 10) %>%
+  mutate(pickup_latitude = (pickup_latitude * pi)/180) %>%
+  mutate(dropoff_latitude = (dropoff_latitude * pi)/180) %>%
+  mutate(dropoff_longitude = (dropoff_longitude * pi)/180) %>%
+  mutate(pickup_longitude = (pickup_longitude * pi)/180 ) %>%
+  mutate(dropoff_longitude = ifelse(is.na(dropoff_longitude) == TRUE, 0,dropoff_longitude)) %>%
+  mutate(pickup_longitude = ifelse(is.na(pickup_longitude) == TRUE, 0,pickup_longitude)) %>%
+  mutate(pickup_latitude = ifelse(is.na(pickup_latitude) == TRUE, 0,pickup_latitude)) %>%
+  mutate(dropoff_latitude = ifelse(is.na(dropoff_latitude) == TRUE, 0,dropoff_latitude)) %>%
+  select(-pickup_datetime,-hour_class,-min)  
+
+```
+
+```{r}
+#checkpoint
+write.csv(train, "input/train_eng_2.csv")
+```
+
+
+```{r}
+#Compute dif lat - long from dropoff
+train$dlat = train$dropoff_latitude - train$pickup_latitude
+train$dlon = train$dropoff_longitude - train$pickup_longitude 
+
+#Compute haversine distance
+train$hav = sin(train$dlat/2.0)**2 + cos(train$pickup_latitude) * cos(train$dropoff_latitude) * sin(train$dlon/2.0)**2
+train$haversine = 2 * earth_radius * asin(sqrt(train$hav))
+```
+
+
+```{r}
+#Compute Bearing distance
+#https://en.wikipedia.org/wiki/Bearing_(navigation)
+train$dlon = train$pickup_longitude - train$dropoff_longitude
+train$bearing = atan2(sin(train$dlon * cos(train$dropoff_latitude)), cos(train$pickup_latitude) * sin(train$dropoff_latitude) - sin(train$pickup_latitude) * cos(train$dropoff_latitude) * cos(train$dlon))
+```
+
+
+```{r}
+#Places Latitude and Longitude for main places in NYC where most cabs are/go
+jfk_coord_lat = (40.639722 * pi)/180
+jfk_coord_long = (-73.778889 * pi)/180
+ewr_coord_lat = (40.6925 * pi)/180
+ewr_coord_long = (-74.168611 * pi)/180
+lga_coord_lat = (40.77725 * pi)/180
+lga_coord_long = (-73.872611 * pi)/180
+liberty_statue_lat = (40.6892 * pi)/180
+liberty_statue_long = (-74.0445 * pi)/180
+nyc_lat = (40.7141667 * pi)/180
+nyc_long = (-74.0063889 * pi)/180
+
+
+sphere_dist = function(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon)
+{
+  #Compute distances along lat, lon dimensions
+  dlat = dropoff_lat - pickup_lat
+  dlon = dropoff_lon - pickup_lon
+  
+  #Compute  distance
+  a = sin(dlat/2.0)**2 + cos(pickup_lat) * cos(dropoff_lat) * sin(dlon/2.0)**2
+  
+  return (2 * earth_radius * asin(sqrt(a)))
+  
+}   
+
+train$JFK_dist = sphere_dist(train$pickup_latitude, train$pickup_longitude, jfk_coord_lat, jfk_coord_long) + sphere_dist(jfk_coord_lat, jfk_coord_long, train$dropoff_latitude, train$dropoff_longitude)
+train$EWR_dist = sphere_dist(train$pickup_latitude, train$pickup_longitude, ewr_coord_lat, ewr_coord_long) +  sphere_dist(ewr_coord_lat, ewr_coord_long, train$dropoff_latitude, train$dropoff_longitude)
+train$lga_dist = sphere_dist(train$pickup_latitude, train$pickup_longitude, lga_coord_lat, lga_coord_long) + sphere_dist(lga_coord_lat, lga_coord_long, train$dropoff_latitude, train$dropoff_longitude) 
+train$sol_dist = sphere_dist(train$pickup_latitude, train$pickup_longitude, liberty_statue_lat, liberty_statue_long) + sphere_dist(liberty_statue_lat, liberty_statue_long, train$dropoff_latitude, train$dropoff_longitude)
+train$nyc_dist = sphere_dist(train$pickup_latitude, train$pickup_longitude, nyc_lat, nyc_long) + sphere_dist(nyc_lat, nyc_long, train$dropoff_latitude, train$dropoff_longitude)
+```
+
+```{r}
+#checkpoint
+write.csv(train, "input/train_eng_2.csv")
+```
+
+```{r}
+# Removing Latitude or longitude zero value mean fare
+out = train %>%
+  filter(pickup_longitude == 0 |  pickup_latitude == 0 | dropoff_latitude == 0 | dropoff_longitude ==0)
+
+out_mean = mean(out$fare_amount)
+out_mean
+```
+
+```{r}
+cols = colnames(train)
+cols
+```
+
+
+```{r}
+#removing the target and filter the valid features from training
+#train = as.data.frame(train) %>% 
+#  filter(!(pickup_longitude == 0 |  pickup_latitude == 0 | dropoff_latitude == 0 | dropoff_longitude ==0)) %>%
+#  select(-dlat,-dlon,-hav)
+
+target = train$fare_amount
+train = train %>% select (- fare_amount)
+
+cols = colnames(train)
+cols
+```
+
+```{r}
+train$year = as.numeric(train$year)
+train$month = as.numeric(train$month)
+train$Wday = as.numeric(train$Wday)
+train$day = as.numeric(train$day)
+```
+
+```{r}
+train_val_split_index = createDataPartition(target, p = 0.9, list = F) %>% c()
+```
+
+```{r}
+length(train_val_split_index)
+```
+
+# models
+```{r}
+#lm(target ~ pickup_longitude + pickup_latitude + dropoff_longitude + dropoff_latitude + passenger_count + hour + year + day + month + Wday + haversine + JFK_dist + EWR_dist + lga_dist + sol_dist + nyc_dist, train)
+m_additive = lm(target ~ ., train)
+
+```
+
+```{r}
+library(faraway)
+vif(m_additive)
+```
+
+```{r}
+m_additive2 = lm(target ~ pickup_longitude + pickup_latitude + dropoff_longitude + dropoff_latitude + passenger_count + hour + year + month + Wday + JFK_dist + EWR_dist + lga_dist + nyc_dist, train)
+```
+
+
+```{r}
+calc_rmse = function(model) {
+  sqrt(mean((resid(model) / (1 - hatvalues(model))) ^ 2))
+}
+```
+
+```{r}
+calc_rmse(m_additive)
+```
+
+```{r}
+calc_rmse(m_additive2)
+```
+
+
+```{r}
+sqrt(sum((target[train_val_split_index] - predict(m_additive, newdata=train[train_val_split_index, ]))^2) / nrow(train[train_val_split_index, ]))
+```
+
+
+```{r}
+cols
+```
+
+```{r}
+library(magrittr)
+te <- read.csv("input/test.csv",colClasses=c("key"="character","pickup_datetime"="POSIXct",
+                                                "dropoff_longitude"="numeric","pickup_longitude"="numeric","dropoff_latitude"="numeric","pickup_latitude"="numeric",
+                                                "passenger_count"="integer"),header=TRUE,sep=',') %>% select(-key)
+
+te  <- te %>% 
+  mutate(pickup_datetime = as.POSIXct(pickup_datetime)) %>%
+  mutate(hour = as.numeric(format(pickup_datetime, "%H"))) %>%
+  mutate(min = as.numeric(format(pickup_datetime, "%M"))) %>%
+  mutate(year = as.factor(format(pickup_datetime, "%Y"))) %>% 
+  mutate(day = as.factor(format(pickup_datetime, "%d"))) %>%
+  mutate(month = as.factor(format(pickup_datetime, "%m"))) %>%
+  mutate(Wday = as.factor(weekdays(pickup_datetime))) %>%
+  mutate(hour_class = ifelse(hour < 7, "Overnight", 
+                             ifelse(hour < 11, "Morning", 
+                                    ifelse(hour < 16, "Noon", 
+                                           ifelse(hour < 20, "Evening",
+                                                  ifelse(hour < 23, "night", "overnight") ) )))) %>%
+  mutate(pickup_latitude = (pickup_latitude * pi)/180) %>%
+  mutate(dropoff_latitude = (dropoff_latitude * pi)/180) %>%
+  mutate(dropoff_longitude = (dropoff_longitude * pi)/180) %>%
+  mutate(pickup_longitude = (pickup_longitude * pi)/180 ) %>%
+  mutate(dropoff_longitude = ifelse(is.na(dropoff_longitude) == TRUE, 0,dropoff_longitude)) %>%
+  mutate(pickup_longitude = ifelse(is.na(pickup_longitude) == TRUE, 0,pickup_longitude)) %>%
+  mutate(pickup_latitude = ifelse(is.na(pickup_latitude) == TRUE, 0,pickup_latitude)) %>%
+  mutate(dropoff_latitude = ifelse(is.na(dropoff_latitude) == TRUE, 0,dropoff_latitude)) %>%
+  select(-pickup_datetime,-hour_class,-min)
+te$dlat <- te$dropoff_latitude - te$pickup_latitude
+te$dlon <- te$dropoff_longitude - te$pickup_longitude
+
+#Compute haversine distance
+te$hav = sin(te$dlat/2.0)**2 + cos(te$pickup_latitude) * cos(te$dropoff_latitude) * sin(te$dlon/2.0)**2
+te$haversine <- 2 * earth_radius * asin(sqrt(te$hav))
+
+
+te$dlon <- te$pickup_longitude - te$dropoff_longitude
+te$bearing = atan2(sin(te$dlon * cos(te$dropoff_latitude)), cos(te$pickup_latitude) * sin(te$dropoff_latitude) - sin(te$pickup_latitude) * cos(te$dropoff_latitude) * cos(te$dlon))    
+
+
+te$JFK_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, jfk_coord_lat, jfk_coord_long) + sphere_dist(jfk_coord_lat, jfk_coord_long, te$dropoff_latitude, te$dropoff_longitude)
+te$EWR_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, ewr_coord_lat, ewr_coord_long) +  sphere_dist(ewr_coord_lat, ewr_coord_long, te$dropoff_latitude, te$dropoff_longitude)
+te$lga_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, lga_coord_lat, lga_coord_long) + sphere_dist(lga_coord_lat, lga_coord_long, te$dropoff_latitude, te$dropoff_longitude) 
+te$sol_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, liberty_statue_lat, liberty_statue_long) + sphere_dist(liberty_statue_lat, liberty_statue_long, te$dropoff_latitude, te$dropoff_longitude) 
+te$nyc_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, nyc_lat, nyc_long) + sphere_dist(nyc_lat, nyc_long, te$dropoff_latitude, te$dropoff_longitude)  
+
+te <- te %>% select(-dlat,-dlon,-hav)
+
+te$year <- as.numeric(te$year)
+te$month <- as.numeric(te$month)
+te$Wday <- as.numeric(te$Wday)
+te$day <- as.numeric(as.factor(te$day))
+```
+
+```{r}
+#---------------------------
+cat("Making submission file...\n")
+
+read.csv("./input/sample_submission.csv") %>%  
+  mutate(fare_amount = predict(m_additive2, te)) %>%
+  write_csv("sub_lm_aditive_2.csv")
+```
+
+
+## using CV from caret
+
+```{r}
+# Define training control
+tr.control = trainControl(method = "LOOCV")
+# Train the model
+model_cv = train(target ~., data = train, method = "lm",
+               trControl = tr.control)
+# Summarize the results
+print(model_cv)
+```
+
+
+```{r}
+
+categoricals.vec = colnames(tr)[c(grep("cat",colnames(tr)))]
+
+tri <- createDataPartition(target, p = 0.9, list = F) %>% c()
+
+dtrain <- Matrix(as.matrix(tr[tri, ]),sparse=TRUE)
+dval <- Matrix(as.matrix(tr[-tri, ]),sparse=TRUE)
+
+#---------------------------
+cat("Lightgbm Training model ...\n")
+
+categorical_feature <- c("day","month","year")
+
+lgb.train = lgb.Dataset(data=dtrain,label=target[tri],categorical_feature =categorical_feature)
+lgb.valid = lgb.Dataset(data=dval,label=target[-tri],categorical_feature =categorical_feature)
+
+
+lgb.grid = list(objective = "regression"
+                , metric = "rmse"
+                ,num_boost_round=10000
+)
+
+lgb.model <- lgb.train(
+  params = lgb.grid
+  , data = lgb.train
+  , valids = list(val = lgb.valid)
+  , learning_rate = 0.034
+  , num_leaves = 31
+  , max_depth = -1
+  , subsample = .8
+  # , subsample_freq =1
+  , colsample_bytree = 0.6
+  , min_split_gain = 0.5
+  , min_child_weight = 1
+  , min_child_samples =10
+  , scale_pos_weight = 1
+  , num_threads = 4
+  , boosting_type = "gbdt"
+  , zero_as_missing = T
+  , seed = 0
+  , nrounds = 40000
+  , early_stopping_rounds = 500
+  , eval_freq = 50
+)        
+
+rm(tr, target, tri,dtrain,dval)
+gc()
+
+
+cat("Reading Test data...\n")
+te <- read.csv("../input/test.csv",colClasses=c("key"="character","pickup_datetime"="POSIXct",
+                                                "dropoff_longitude"="numeric","pickup_longitude"="numeric","dropoff_latitude"="numeric","pickup_latitude"="numeric",
+                                                "passenger_count"="integer"),header=TRUE,sep=',') %>% select(-key)
+
+te  <- te %>% 
+  mutate(pickup_datetime = as.POSIXct(pickup_datetime)) %>%
+  mutate(hour = as.numeric(format(pickup_datetime, "%H"))) %>%
+  mutate(min = as.numeric(format(pickup_datetime, "%M"))) %>%
+  mutate(year = as.factor(format(pickup_datetime, "%Y"))) %>% 
+  mutate(day = as.factor(format(pickup_datetime, "%d"))) %>%
+  mutate(month = as.factor(format(pickup_datetime, "%m"))) %>%
+  mutate(Wday = as.factor(weekdays(pickup_datetime))) %>%
+  mutate(hour_class = ifelse(hour < 7, "Overnight", 
+                             ifelse(hour < 11, "Morning", 
+                                    ifelse(hour < 16, "Noon", 
+                                           ifelse(hour < 20, "Evening",
+                                                  ifelse(hour < 23, "night", "overnight") ) )))) %>%
+  mutate(pickup_latitude = (pickup_latitude * pi)/180) %>%
+  mutate(dropoff_latitude = (dropoff_latitude * pi)/180) %>%
+  mutate(dropoff_longitude = (dropoff_longitude * pi)/180) %>%
+  mutate(pickup_longitude = (pickup_longitude * pi)/180 ) %>%
+  mutate(dropoff_longitude = ifelse(is.na(dropoff_longitude) == TRUE, 0,dropoff_longitude)) %>%
+  mutate(pickup_longitude = ifelse(is.na(pickup_longitude) == TRUE, 0,pickup_longitude)) %>%
+  mutate(pickup_latitude = ifelse(is.na(pickup_latitude) == TRUE, 0,pickup_latitude)) %>%
+  mutate(dropoff_latitude = ifelse(is.na(dropoff_latitude) == TRUE, 0,dropoff_latitude)) %>%
+  select(-pickup_datetime,-hour_class,-min)
+te$dlat <- te$dropoff_latitude - te$pickup_latitude
+te$dlon <- te$dropoff_longitude - te$pickup_longitude
+
+#Compute haversine distance
+te$hav = sin(te$dlat/2.0)**2 + cos(te$pickup_latitude) * cos(te$dropoff_latitude) * sin(te$dlon/2.0)**2
+te$haversine <- 2 * R_earth * asin(sqrt(te$hav))
+
+
+te$dlon <- te$pickup_longitude - te$dropoff_longitude
+te$bearing = atan2(sin(te$dlon * cos(te$dropoff_latitude)), cos(te$pickup_latitude) * sin(te$dropoff_latitude) - sin(te$pickup_latitude) * cos(te$dropoff_latitude) * cos(te$dlon))    
+
+
+te$JFK_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, jfk_coord_lat, jfk_coord_long) + sphere_dist(jfk_coord_lat, jfk_coord_long, te$dropoff_latitude, te$dropoff_longitude)
+te$EWR_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, ewr_coord_lat, ewr_coord_long) +  sphere_dist(ewr_coord_lat, ewr_coord_long, te$dropoff_latitude, te$dropoff_longitude)
+te$lga_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, lga_coord_lat, lga_coord_long) + sphere_dist(lga_coord_lat, lga_coord_long, te$dropoff_latitude, te$dropoff_longitude) 
+te$sol_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, liberty_statue_lat, liberty_statue_long) + sphere_dist(liberty_statue_lat, liberty_statue_long, te$dropoff_latitude, te$dropoff_longitude) 
+te$nyc_dist = sphere_dist(te$pickup_latitude, te$pickup_longitude, nyc_lat, nyc_long) + sphere_dist(nyc_lat, nyc_long, te$dropoff_latitude, te$dropoff_longitude)  
+
+te <- te %>% select(-dlat,-dlon,-hav)
+
+te$year <- as.numeric(te$year)
+te$month <- as.numeric(te$month)
+te$Wday <- as.numeric(te$Wday)
+te$day <- as.numeric(as.factor(te$day))
+
+dtest1 <- Matrix(as.matrix(te),sparse=TRUE)
+
+#---------------------------
+cat("Making submission file...\n")
+
+read.csv("../input/sample_submission.csv") %>%  
+  mutate(fare_amount = predict(lgb.model, dtest1)) %>%
+  write_csv("LightGBM_fare_amount.csv")
+
+```
+

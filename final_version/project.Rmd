@@ -1,0 +1,387 @@
+---
+title: "Final Project Proposal"
+author: "Danilo Canivel, Joel Zou, Danny Breyfogle"
+date: "08/03/2019"
+output:
+  html_document: 
+    toc: yes
+  pdf_document: default
+urlcolor: cyan
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, include=FALSE)
+```
+
+# Introduction
+
+This study will be conducted by the following students of Stat420 Summer 2019:
+
+ - Danilo Canivel (canivel2)
+ - Joel Zou (joelzou2)
+ - Danny Breyfogle (dwb4)
+
+## Let's call a Taxi... Maybe not.
+
+## Dataset
+
+For this project we will be predicting the fare amount (inclusive of tolls) for a taxi ride in New York City given the pickup and dropoff locations. 
+
+This dataset has 6 features:
+
+- `pickup_datetime` (datetime)
+- `pickup_longitude` (numeric)
+- `pickup_latitude` (numeric)
+- `dropoff_longitude` (numeric)
+- `dropoff_latitude` (numeric)
+- `passenger counts` (numeric)
+
+We will be predicting the numeric response `fare_amount`, fitting on a training set, and predicting on a test set.
+
+There are about 55 million observations in the training set. This is a very large dataset, so we may need to use a subset to meet computing requirements. In order to satisfy the project requirement of at least one categorical predictor, we can transform the `pickup_datetime` feature into categorical variables  that would potentially be helpful in determining the fare amount, some examples would be day of the week, morning, afternoon, evening, etc.
+
+We are going to set a preliminary objective of trying to reach a $RMSE < 2$ but a $RMSE < 2.88$ can be considered acceptable. 
+
+The dataset can be found at: [https://www.kaggle.com/c/new-york-city-taxi-fare-prediction/data]()
+
+## Read Data
+
+```{r}
+nrows = 500000
+fdata = read.csv("../input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
+head(fdata)
+```
+
+# Methods
+
+```{r}
+library(lubridate)
+library(ggplot2)
+library(cluster)
+library(tidyverse)
+library(caret)
+library(magrittr)
+library(Matrix)
+library(faraway)
+library(broom)
+```
+
+
+## Outlier Removal
+
+In the dataset, the continuous variables fare_amount, pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude can assume to be normally distributed. Since linear regression model coefficients are sensitive to outliers in the training data, we will use the boxplot rule to remove observations that has values greater than 1.5IQR away from the medium in each of these variables, which should help make our model generalize to unseen data that would follow a similar normal distribution.
+
+```{r}
+# remove na obs
+fdata = na.omit(fdata)
+```
+
+** detecting outliers **
+```{r}
+boxplot(fare_amount ~ as.factor(year(as_datetime(fdata$pickup_datetime, tz="UTC"))), fdata)
+```
+
+
+
+```{r}
+fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
+              fdata$pickup_longitude > median(fdata$pickup_longitude - 1.5 * IQR(fdata$pickup_longitude)) &
+              fdata$pickup_latitude < median(fdata$pickup_latitude) + 1.5 * IQR(fdata$pickup_latitude) &
+              fdata$pickup_latitude > median(fdata$pickup_latitude) - 1.5 * IQR(fdata$pickup_latitude),]
+  print(dim(fdata))
+  # Outlier Dropoff locations
+  fdata = fdata[fdata$dropoff_longitude < median(fdata$dropoff_longitude) + 1.5 * IQR(fdata$dropoff_longitude) &
+              fdata$dropoff_longitude > median(fdata$dropoff_longitude - 1.5 * IQR(fdata$dropoff_longitude)) &
+              fdata$dropoff_latitude < median(fdata$dropoff_latitude) + 1.5 * IQR(fdata$dropoff_latitude) &
+              fdata$dropoff_latitude > median(fdata$dropoff_latitude) - 1.5 * IQR(fdata$dropoff_latitude),]
+  print(dim(fdata))
+  # Outlier Fare Amount
+fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
+```
+
+** not as many outliers afterwards **
+```{r}
+boxplot(fare_amount ~ as.factor(year(as_datetime(fdata$pickup_datetime, tz="UTC"))), fdata)
+```
+
+
+
+## Feature Engineering
+
+Several features are been created on this step:
+  - First if we are processing for training, we are gonna remove several outliers relate to fare amount, location and passenger count
+  - Next we fatorize some of the features to work as categories
+  - time for example is factorize in 6 different categories
+  - the locations are converted in radius 
+  - We decided to add a few locations where taxis usually take or drop passengers in NYC.
+  - We Compute haversine distance and Bearing distances
+
+```{r}
+earth_radius = 6371 #in kms
+
+sphere_dist = function(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon)
+{
+    #Compute distances along lat, lon dimensions
+    dlat = dropoff_lat - pickup_lat
+    dlon = dropoff_lon - pickup_lon
+    
+    #Compute  distance
+    a = sin(dlat/2.0)**2 + cos(pickup_lat) * cos(dropoff_lat) * sin(dlon/2.0)**2
+    
+    return (2 * earth_radius * asin(sqrt(a)))
+    
+} 
+
+features_eng = function(data, istrain=TRUE){
+  
+  if(istrain == TRUE){
+    #data = data[complete.cases(data),]
+    # Remove Negative Fare and No Passenger and some places that does not exist
+    data = data[(data$fare_amount > 0 & data$fare_amount <= 500),]
+    data = data[(data$pickup_longitude > -80 && data$pickup_longitude < -70),]
+    data = data[(data$pickup_latitude > 35 && data$pickup_latitude < 45),]
+    data = data[(data$dropoff_longitude > -80 && data$dropoff_longitude < -70),]
+    data = data[(data$dropoff_latitude > 35 && data$dropoff_latitude < 45),]
+    #only if passengers are between 1 and 9
+    data = data[(data$passenger_count > 0 && data$passenger_count < 10),]
+  }
+  
+  # Convert to datetime obj
+  data$pickup_datetime = as_datetime(data$pickup_datetime, tz="UTC")
+
+  # factorization
+  data$year = as.factor(year(data$pickup_datetime))
+  data$month = as.factor(month(data$pickup_datetime))
+  data$day = as.factor(day(data$pickup_datetime))
+  data$weekday = as.factor(weekdays(data$pickup_datetime))
+
+  #factor time of the day
+  hour = hour(data$pickup_datetime)
+  data$time = as.factor(ifelse(hour < 7, "Overnight", 
+                               ifelse(hour < 11, "Morning", 
+                                      ifelse(hour < 16, "Noon",
+                                             ifelse(hour < 20, "Evening",
+                                                    ifelse(hour < 23, "night", "overnight")
+                        )))))
+  # convert to radius position
+  data$pickup_latitude = (data$pickup_latitude * pi)/180
+  data$dropoff_latitude = (data$dropoff_latitude * pi)/180
+  data$dropoff_longitude = (data$dropoff_longitude * pi)/180
+  data$pickup_longitude = (data$pickup_longitude * pi)/180 
+  data$dropoff_longitude = ifelse(is.na(data$dropoff_longitude) == TRUE, 0,data$dropoff_longitude)
+  data$pickup_longitude = ifelse(is.na(data$pickup_longitude) == TRUE, 0,data$pickup_longitude)
+  data$pickup_latitude = ifelse(is.na(data$pickup_latitude) == TRUE, 0,data$pickup_latitude)
+  data$dropoff_latitude = ifelse(is.na(data$dropoff_latitude) == TRUE, 0,data$dropoff_latitude)
+
+  # compare locations
+  data$dlat = data$dropoff_latitude - data$pickup_latitude
+  data$dlon = data$dropoff_longitude - data$pickup_longitude 
+  
+  #Compute haversine distance
+  
+  data$hav = sin(data$dlat/2.0)**2 + cos(data$pickup_latitude) * cos(data$dropoff_latitude) * sin(data$dlon/2.0)**2
+  data$haversine = round(x = 2 * earth_radius * asin(sqrt(data$hav)), digits = 4)
+  print(dim(data))
+  
+  #Compute Bearing distance
+  data$dlon = data$pickup_longitude - data$dropoff_longitude
+  data$bearing = atan2(sin(data$dlon * cos(data$dropoff_latitude)), cos(data$pickup_latitude) * sin(data$dropoff_latitude) - sin(data$pickup_latitude) * cos(data$dropoff_latitude) * cos(data$dlon))
+
+  #Some point of interest where people most use taxis in NYC
+  jfk_coord_lat = (40.639722 * pi)/180
+  jfk_coord_long = (-73.778889 * pi)/180
+  ewr_coord_lat = (40.6925 * pi)/180
+  ewr_coord_long = (-74.168611 * pi)/180
+  lga_coord_lat = (40.77725 * pi)/180
+  lga_coord_long = (-73.872611 * pi)/180
+  liberty_statue_lat = (40.6892 * pi)/180
+  liberty_statue_long = (-74.0445 * pi)/180
+  nyc_lat = (40.7141667 * pi)/180
+  nyc_long = (-74.0063889 * pi)/180
+  
+  #calculate distances radius for the POI
+  data$JFK_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, jfk_coord_lat, jfk_coord_long) + sphere_dist(jfk_coord_lat, jfk_coord_long, data$dropoff_latitude, data$dropoff_longitude)
+  data$EWR_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, ewr_coord_lat, ewr_coord_long) +  sphere_dist(ewr_coord_lat, ewr_coord_long, data$dropoff_latitude, data$dropoff_longitude)
+  data$lga_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, lga_coord_lat, lga_coord_long) + sphere_dist(lga_coord_lat, lga_coord_long, data$dropoff_latitude, data$dropoff_longitude) 
+  data$sol_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, liberty_statue_lat, liberty_statue_long) + sphere_dist(liberty_statue_lat, liberty_statue_long, data$dropoff_latitude, data$dropoff_longitude)
+  data$nyc_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, nyc_lat, nyc_long) + sphere_dist(nyc_lat, nyc_long, data$dropoff_latitude, data$dropoff_longitude)
+  
+  #remove some columns
+  drops <- c("key","pickup_datetime")
+  data = data[, !(names(data) %in% drops)]
+  print(dim(data))
+  return (data)
+  
+}
+```
+
+```{r}
+fdata = features_eng(data = fdata)
+```
+
+
+## Calculate anova test for each dummy variable
+
+```{r}
+dummy_anova = function(pred, resp) {
+  m0 = lm(resp ~ 1)
+  m1 = lm(resp ~ pred)
+  anova(m0, m1)[["Pr(>F)"]][2]
+}
+```
+
+```{r}
+cols = c("year", "month", "day", "weekday", "time")
+pvals = rep(0, length(cols))
+for (i in 1:length(cols)) pvals[i] = dummy_anova(fdata[[cols[i]]], fdata$fare_amount)
+df = data.frame(dummyvar=cols, pvals=pvals)
+knitr::kable(df)
+```
+
+## Model
+
+## Lets split the data for training and test
+
+```{r}
+inds = sample.int(nrow(fdata), size=nrow(fdata) * 0.9) 
+train = fdata[inds,]
+test = fdata[-inds,]
+dim(train)
+dim(test)
+head(train)
+```
+
+## seeting the RMSE and LOORMSE functions
+
+```{r}
+calc_rmse = function(model) {
+  sqrt(mean((resid(model) / (1 - hatvalues(model))) ^ 2))
+}
+
+calc_rmse2 = function(model, data){
+  sqrt(sum((data$fare_amount - predict(model, newdata=data))^2) / nrow(data))
+}
+```
+
+
+## Multiple Linear Regression
+
+** Let start by doing a simple baseline model and check the results **
+
+```{r}
+m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + pickup_longitude + passenger_count + year + month + day + weekday + time + dlat + dlon + haversine + bearing, train)
+```
+
+** Looks like correlation is over control**
+
+```{r}
+vif(m_additive)
+```
+
+** Both RMSE and LOORMSE are close giving a difference between 1.75 and 1.76 dollars **
+
+```{r}
+calc_rmse(m_additive)
+calc_rmse2(m_additive, test)
+```
+
+** Let's try to find better features from the additive model to fix the error: prediction from a rank-deficient fit may be misleading **
+
+```{r}
+n = length(resid(m_additive))
+m_additive_bic = step(m_additive, direction = "both", k = log(n))
+```
+
+** the model with Step:  AIC=309509.3 was the best one for this amount of data, lets check the correlations**
+
+
+```{r}
+vif(m_additive_bic)
+```
+
+** correlation is under control**
+
+```{r}
+calc_rmse(m_additive_bic)
+calc_rmse2(m_additive_bic, test)
+```
+
+** the model perform a little better but not much to be considered**
+
+** lets check the statistics and the p-value for both additive models**
+
+```{r}
+summary(m_additive)
+summary(m_additive_bic)
+```
+
+
+```{r}
+anova(m_additive_bic, m_additive)
+```
+
+** both models have the same p-value < 2.2e-16, and the comparision the model m_additive_bic perform a little better, but not to create a bigger difference **
+
+
+** Test log transform on response **
+```{r}
+m_additive_log = lm(log(fare_amount) ~ dropoff_longitude + dropoff_latitude + pickup_latitude + 
+    pickup_longitude + passenger_count + year + month + weekday + 
+    time + haversine + bearing, train)
+```
+
+```{r}
+# test rmse
+sqrt(sum((test$fare_amount - exp(predict(m_additive_log, test)))^2) / nrow(test))
+```
+** It appears that log transform hurts the performance of the model on the test set so we will not consider this model**
+
+
+* Try interaction of the variables selected *
+
+```{r}
+m_int = lm(fare_amount ~ (dropoff_longitude + dropoff_latitude + pickup_latitude + 
+    pickup_longitude + passenger_count + year + month + weekday + 
+    time + haversine + bearing)^2, train)
+```
+
+
+```{r}
+calc_rmse(m_int)
+calc_rmse2(m_int, test)
+```
+
+```{r}
+anova(m_additive_bic, m_int)
+```
+
+** we clear see that the results are better, but probably there is some overfit since we are interatcting several factorized features, more data will proably be necessary to train such larger model **
+
+** the RMSE and LOORMSE  are much better, lowering the amount of errors in dollars by the range of 1.56557 - 1.55991 **
+
+** comparing both the aditive bic and the interactive, the interactive is much better so we assume it is the better model **
+
+
+# Results
+
+** The target RMSE of 2.8 was achieved, in fact, we lower it by the range of 1.56557 - 1.55991 dollars for 500k observations trained (the total data available is 55M)**
+
+# Discussion
+
+We found observations in the dataset that had non-positive fare_amount and passenger_count, these are likely due to errors in data entry and would not help generalize our model to predict on new data of interest, thus we remove these observations before further usage. The continuous variables fare_amount, pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude in the dataset can assume to be normally distributed. Since linear regression model coefficients are sensitive to outliers, we will use the boxplot rule to remove observations that has values greater than 1.5IQR away from the medium in each of these variables.
+
+In order to make use of the pickup time information, we will create categorical dummy variables by converting the pickup_datetime column into a timestamp object. The variables we chose to create that could be helpful in predicting the fare_amount are the year, month, day of month, day of week and time of the day of each taxi ride pickup. The construction of the first four variables are trivial, for the time dummy variable, we divided the observations into 5 bins: Morning, Noon, Evening, Night and Overnight, this is based on the intuition that there is a general pattern in types of taxi rides people take depending on the time of day, for example people might be taking taxis to go to work in the morning, go to lunch at noon, back home in the evening and to entertainment venues at night.
+
+We conducted ANOVA f-test for each of these dummy variable to get a feel on their effect on the response. The null hypothesis of each test would be that the mean of the response variable is the same for all levels of the dummy variable, by calculating the p-value and taking an $alpha=0.05$, we found that we could reject the null for the year, month, day, weekday and time dummy variables; There are statistically significance between the different levels of each of the dummy variable and the response, therefore we used these dummy variables as predictors in the linear regression model. 
+
+Linear Regression is a very good base line for this problem, but it's not the best one for solving it. Since the amount of data and coeffients are to sparse, a better optimization process like Gradient Descendent(SGD) or Information Gain would achieve better performance and results.
+
+Looking on this directions, we added a different approach, xgboost.Rmd, using XGboost, that clear achieve much better results on unseeing data.
+
+A web client can be found at the client/webapp.R, it runs local, predicting the value using the XGBoost model located in the same folder.
+
+# Appendix
+    - [https://www.kaggle.com/c/new-york-city-taxi-fare-prediction/data]()
+    - [https://en.wikipedia.org/wiki/Haversine_formula]()
+    - [https://en.wikipedia.org/wiki/Bearing_(navigation)]()

@@ -1,0 +1,52 @@
+---
+title: "Final Project Proposal"
+author: "Danilo Canivel, Joel Zou, Danny Breyfogle"
+date: "7/15/2019"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Group Introduction
+
+This study will be conducted by the following students of Stat420 Summer 2019:
+
+ - Danilo Canivel (canivel2)
+ - Joel Zou (joelzou2)
+ - Danny Breyfogle (dwb4)
+
+## Let's call a Taxi... Maybe not.
+
+## Dataset
+
+For this project we will be predicting the fare amount (inclusive of tolls) for a taxi ride in New York City given the pickup and dropoff locations. 
+
+This dataset has 6 features:
+
+- `pickup_datetime` (datetime)
+- `pickup_longitude` (numeric)
+- `pickup_latitude` (numeric)
+- `dropoff_longitude` (numeric)
+- `dropoff_latitude` (numeric)
+- `passenger counts` (numeric)
+
+We will be predicting the numeric response `fare_amount`, fitting on a training set, and predicting on a test set.
+
+There are about 55 million observations in the training set. This is a very large dataset, so we may need to use a subset to meet computing requirements. In order to satisfy the project requirement of at least one categorical predictor, we can transform the `pickup_datetime` feature into categorical variables  that would potentially be helpful in determining the fare amount, some examples would be day of the week, morning, afternoon, evening, etc.
+
+We are going to set a preliminary objective of trying to reach a $RMSE < 2$ but a $RMSE < 2.88$ can be considered acceptable. After predicting, we are going to compare with the Uber estimate API and deliver both results to the customer in a simple Web interface for decision.
+
+The dataset can be found at: [https://www.kaggle.com/c/new-york-city-taxi-fare-prediction/data]()
+
+The Uber API can be found here:
+[https://developer.uber.com/docs/riders/references/api/v1.2/estimates-price-get]()
+
+Finally, below are a few observations from the training set:
+
+```{r}
+taxi_data = read.csv("input/train.csv", nrows=100000)
+head(taxi_data)
+```
