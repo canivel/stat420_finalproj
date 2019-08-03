@@ -66,7 +66,7 @@ server = function(input, output) {
     }else{
     
       pa = gsub(" ", "+", input$pickup_address)
-      gkey = "AIzaSyCdUgYHnqrxRM3BBjWJ6VUZbaIlkemU85E"
+      gkey = "XXXXXXXX"
       url_pa = URLencode(sprintf("https://maps.googleapis.com/maps/api/geocode/json?address=%s&key=%s", pa, gkey))
       pa_res = fromJSON(url_pa)
       f_pickup_address = pa_res$results$formatted_address[1]
