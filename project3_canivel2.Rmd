@@ -10,17 +10,21 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-```{r, eval=FALSE}
+```{r}
 library(lubridate)
+library(ggplot2)
 library(cluster)
 library(tidyverse)
 library(caret)
 library(magrittr)
 library(Matrix)
+library(faraway)
 ```
 
 
 ## Read Data
+
+** We are using a small chunk of the data just to be able to run some local hipotheses**
 
 ```{r}
 nrows = 100000
@@ -28,6 +32,16 @@ fdata = read.csv("./input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
 ```
 
 ## Feature Engineering
+
+** Several features are been created on this step: **
+  - First if we are processing for training, we are gonna remove several outliers relate to fare amount, location and passenger count
+  - Next we fatorize some of the features to work as categories
+  - time for example is factorize in 6 different categories
+  - the locations are converted in radius 
+  - We decided to add a few locations where taxis usually take or drop passengers in NYC.
+  - We Compute haversine distance and Bearing distances
+    - https://en.wikipedia.org/wiki/Haversine_formula
+    - https://en.wikipedia.org/wiki/Bearing_(navigation)
 
 ```{r}
 earth_radius = 6371 #in kms
@@ -120,7 +134,7 @@ features_eng = function(data, istrain=TRUE){
   data$nyc_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, nyc_lat, nyc_long) + sphere_dist(nyc_lat, nyc_long, data$dropoff_latitude, data$dropoff_longitude)
   
   #remove some columns
-  drops <- c("pickup_datetime")
+  drops <- c("key","pickup_datetime")
   data = data[, !(names(data) %in% drops)]
   print(dim(data))
   return (data)
@@ -132,9 +146,21 @@ features_eng = function(data, istrain=TRUE){
 fdata = features_eng(data = fdata)
 ```
 
+## Checking for outliers
+
+** Several outliers are still present **
+
 ```{r}
+fit_fy = lm(fare_amount ~ year, data = fdata)
+plot(fare_amount ~ year, data = fdata, col = "grey", pch = 20, cex = 1.5,
+     main = "Fare amount by year")
+```
+
 ### Outlier Pickup locations 
-  fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
+
+** Here we are removing the outliers from the locations based on 1.5 * IQR **
+```{r}
+fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
               fdata$pickup_longitude > median(fdata$pickup_longitude - 1.5 * IQR(fdata$pickup_longitude)) &
               fdata$pickup_latitude < median(fdata$pickup_latitude) + 1.5 * IQR(fdata$pickup_latitude) &
               fdata$pickup_latitude > median(fdata$pickup_latitude) - 1.5 * IQR(fdata$pickup_latitude),]
@@ -146,10 +172,23 @@ fdata = features_eng(data = fdata)
               fdata$dropoff_latitude > median(fdata$dropoff_latitude) - 1.5 * IQR(fdata$dropoff_latitude),]
   print(dim(fdata))
   # Outlier Fare Amount
-  fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
+fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
 ```
 
+## Looks like the outliers are pretty much handle
+```{r}
+fit_fy = lm(fare_amount ~ year, data = fdata)
+plot(fare_amount ~ year, data = fdata, col = "grey", pch = 20, cex = 1.5,
+     main = "Fare amount by year")
+```
 
+```{r}
+plot(fare_amount ~ weekday, data = fdata,
+     main   = "Fare Amount x weekday",
+     col = "grey", pch = 20, cex = 1.5)
+```
+
+## Lets split the data for training and test
 
 ```{r}
 inds = sample.int(nrow(fdata), size=nrow(fdata) * 0.9) 
@@ -159,6 +198,8 @@ dim(train)
 dim(test)
 head(train)
 ```
+
+## seeting the RMSE and LOORMSE functions
 
 ```{r}
 calc_rmse = function(model) {
@@ -173,98 +214,91 @@ calc_rmse2 = function(model, data){
 
 ## Multiple Linear Regression
 
-```{r}
-colnames(fdata)
-```
-
-
+** Let start by doing a simple baseline model and check the results **
 
 ```{r}
-m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + passenger_count + day + weekday + time + dlat + dlon + haversine + bearing, train)
+m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + pickup_longitude + passenger_count + day + weekday + time + dlat + dlon + haversine + bearing, train)
 ```
 
+** Looks like correlation is over control not finding any > 7 **
+
 ```{r}
-m_additive_top_xgb = lm(fare_amount ~ haversine * pickup_datetime * dropoff_longitude + dlat + dropoff_latitude + pickup_longitude + bearing + day + weekday + time, train)
+vif(m_additive)
 ```
+
+**Both RMSE and LOORMSE are close giving a difference between 1.75 and 1.76 dolars **
 
 ```{r}
 calc_rmse(m_additive)
 calc_rmse2(m_additive, test)
 ```
 
+** Let's try to find better features from the additive model to try to get better results **
+
 ```{r}
-calc_rmse(m_additive_top_xgb)
-calc_rmse2(m_additive_top_xgb, test)
+n = length(resid(m_additive))
+m_add_mod_back_bic = step(m_additive, direction = "both", k = log(n))
+```
+
+** the model with Step:  AIC=73136.14 was the best one for this amount of data, lets check the results**
+
+```{r}
+m_additive2 = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + 
+    pickup_longitude + passenger_count + weekday + time + haversine + 
+    bearing, train)
+```
+
+** correlation still under control**
+
+```{r}
+vif(m_additive2)
+```
+
+** the model perform a little better but not much to be considered**
+```{r}
+calc_rmse(m_additive2)
+calc_rmse2(m_additive2, test)
+```
+
+** lets check the statistics and the p-value for both additive models**
+
+```{r}
+summary(m_additive)
+summary(m_additive2)
+anova(m_additive2, m_additive)
+```
+
+** both models have the same p-value < 2.2e-16, and the comparision the model 1 perform a little better, but not to create a bigger difference **
+
+## Second model with interations
+
+```{r}
+m_int = lm(fare_amount ~ .^2, train)
+```
+
+** we clear see that the results are better, but probably there is some overfit since we are interatcting all the features**
+
+** the RMSE and LOORMSE  are clear better lowering the amount of errors in dollars by 1.48 - 1.50 **
+
+```{r}
+calc_rmse(m_int)
+calc_rmse2(m_int, test)
 ```
 
 ```{r}
-anova(m_additive_top_xgb, m_additive)
+anova(m_additive2, m_int)
 ```
 
+** comparing both the aditive and the interactive, the interactive is much better so we assume it as  the  better model **
 
 ```{r}
-#n = length(resid(m_additive))
-#m_add_mod_back_bic = step(m_additive, direction = "backward", k = log(n))
-```
-
-```{r}
-library('faraway')
-round(vif(m_additive), 3)
-
+summary(m_int)
 ```
 
 
-```{r}
-test_kaggle = read.csv("./input/test.csv", stringsAsFactors=FALSE)
-test_kaggle = features_eng(data = test_kaggle, FALSE)
-```
+## Conclusion
+###  The interaction between features will produce a better model, but is overfitting and not generalizing well. The data is to sparse and a Linear Regression  is not able to understand the data completely. 
 
-```{r}
-#---------------------------
-cat("Making submission file...\n")
+### We added a different approach, xgboost_canivel2.Rmd, using XGboost, that clear achive much better results with unseeing  data.
 
-read.csv("./input/sample_submission.csv") %>%  
-  mutate(fare_amount = predict(m_additive_top_xgb, test_kaggle)) %>%
-  write_csv("sub_lm_additive_6.csv")
-```
-
-```{r}
-library(xgboost)
-target = fdata$fare_amount
-
-X_train = train %>% select (- fare_amount)
-X_test = test %>% select (- fare_amount)
-
-dvalid = xgb.DMatrix(data = data.matrix(X_test), label = target[-inds])
-dtrain = xgb.DMatrix(data = data.matrix(X_train), label = target[inds])
-
-p = list(objective = "reg:linear",
-          eval_metric = "rmse",
-          max_depth = 8 ,
-          eta = .05, #.05
-          subsample=1,
-          colsample_bytree=0.8,
-          num_boost_round=1000,
-          nrounds = 6000)
-
-set.seed(0)
-m_xgb = xgb.train(p, dtrain, p$nrounds, list(val = dvalid), print_every_n = 10, early_stopping_rounds = 100)
-```
-##XGB Importance
-```{r}
-xgb.importance(colnames(dtrain), model = m_xgb)
-```
-
-```{r}
-xgb.save(m_xgb, "client/m_xgb_1.model")
-```
-
-
-```{r}
-#---------------------------
-cat("Making submission file...\n")
-
-read.csv("./input/sample_submission.csv") %>%  
-  mutate(fare_amount = predict(m_xgb, data.matrix(test_kaggle))) %>%
-  write_csv("sub_xgb_2.csv")
-```
+### A web client can be found at the client/webapp.R, it runs local predicting the value using  the XGBoost model.
