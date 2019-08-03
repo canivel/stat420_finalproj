@@ -2,7 +2,11 @@
 title: "Final Project Proposal"
 author: "Danilo Canivel, Joel Zou, Danny Breyfogle"
 date: "08/03/2019"
-output: html_document
+output:
+  html_document: 
+    toc: yes
+  pdf_document: default
+urlcolor: cyan
 ---
 
 
@@ -60,6 +64,7 @@ library(caret)
 library(magrittr)
 library(Matrix)
 library(faraway)
+library(broom)
 ```
 
 
@@ -118,7 +123,7 @@ sphere_dist = function(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon)
 features_eng = function(data, istrain=TRUE){
   
   if(istrain == TRUE){
-    data = data[complete.cases(data),]
+    #data = data[complete.cases(data),]
     # Remove Negative Fare and No Passenger and some places that does not exist
     data = data[(data$fare_amount > 0 & data$fare_amount <= 500),]
     data = data[(data$pickup_longitude > -80 && data$pickup_longitude < -70),]
@@ -261,43 +266,49 @@ m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_lati
 vif(m_additive)
 ```
 
-**Both RMSE and LOORMSE are close giving a difference between 1.75 and 1.76 dollars **
+** Both RMSE and LOORMSE are close giving a difference between 1.75 and 1.76 dollars **
 
 ```{r}
 calc_rmse(m_additive)
 calc_rmse2(m_additive, test)
 ```
 
-** Let's try to find better features from the additive model to try to get better results **
+** Let's try to find better features from the additive model to fix the error: prediction from a rank-deficient fit may be misleading **
 
 ```{r}
 n = length(resid(m_additive))
 m_additive_bic = step(m_additive, direction = "both", k = log(n))
 ```
 
-** the model with Step:  AIC=309509.3 was the best one for this amount of data, lets check the results**
+** the model with Step:  AIC=309509.3 was the best one for this amount of data, lets check the correlations**
 
-
-** correlation is under control**
 
 ```{r}
 vif(m_additive_bic)
 ```
 
-** the model perform a little better but not much to be considered**
+** correlation is under control**
+
 ```{r}
 calc_rmse(m_additive_bic)
 calc_rmse2(m_additive_bic, test)
 ```
 
+** the model perform a little better but not much to be considered**
+
 ** lets check the statistics and the p-value for both additive models**
+
+```{r}
+summary(m_additive)
+summary(m_additive_bic)
+```
+
 
 ```{r}
 anova(m_additive_bic, m_additive)
 ```
 
-** both models have the same p-value < 2.2e-16, and the comparision the model 1 perform a little better, but not to create a bigger difference **
-
+** both models have the same p-value < 2.2e-16, and the comparision the model m_additive_bic perform a little better, but not to create a bigger difference **
 
 
 ** Test log transform on response **
@@ -322,10 +333,6 @@ m_int = lm(fare_amount ~ (dropoff_longitude + dropoff_latitude + pickup_latitude
     time + haversine + bearing)^2, train)
 ```
 
-** we clear see that the results are better, but probably there is some overfit since we are interatcting all the features**
-
-** the RMSE and LOORMSE  are clear better lowering the amount of errors in dollars by 1.48 - 1.50 **
-
 
 ```{r}
 calc_rmse(m_int)
@@ -336,21 +343,16 @@ calc_rmse2(m_int, test)
 anova(m_additive_bic, m_int)
 ```
 
+** we clear see that the results are better, but probably there is some overfit since we are interatcting several factorized features, more data will proably be necessary to train such larger model **
 
-** comparing both the aditive and the interactive, the interactive is much better so we assume it as  the  better model **
+** the RMSE and LOORMSE  are much better, lowering the amount of errors in dollars by the range of 1.56557 - 1.55991 **
 
-```{r}
-summary(m_int)
-```
-
-
-** It appears that log transform hurts the performance of the model on the test set **
-
+** comparing both the aditive bic and the interactive, the interactive is much better so we assume it is the better model **
 
 
 # Results
 
-** the RMSE and LOORMSE  are clear better lowering the amount of errors in dollars by 1.48 - 1.50 **
+** The target RMSE of 2.8 was achieved, in fact, we lower it by the range of 1.56557 - 1.55991 dollars for 500k observations trained (the total data available is 55M)**
 
 # Discussion
 
@@ -360,7 +362,9 @@ In order to make use of the pickup time information, we will create categorical 
 
 We conducted ANOVA f-test for each of these dummy variable to get a feel on their effect on the response. The null hypothesis of each test would be that the mean of the response variable is the same for all levels of the dummy variable, by calculating the p-value and taking an $alpha=0.05$, we found that we could reject the null for the year, month, day, weekday and time dummy variables; There are statistically significance between the different levels of each of the dummy variable and the response, therefore we used these dummy variables as predictors in the linear regression model. 
 
-We added a different approach, xgboost.Rmd, using XGboost, that clear achive much better results with unseeing  data.
+Linear Regression is a very good base line for this problem, but it's not the best one for solving it. Since the amount of data and coeffients are to sparse, a better optimization process like Gradient Descendent(SGD) or Information Gain would achieve better performance and results.
+
+Looking on this directions, we added a different approach, xgboost.Rmd, using XGboost, that clear achieve much better results on unseeing data.
 
 A web client can be found at the client/webapp.R, it runs local, predicting the value using the XGBoost model located in the same folder.
 
