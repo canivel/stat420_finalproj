@@ -11,7 +11,7 @@ urlcolor: cyan
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, include=FALSE)
+knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Introduction
@@ -55,7 +55,7 @@ head(fdata)
 
 # Methods
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(lubridate)
 library(ggplot2)
 library(cluster)
@@ -64,7 +64,6 @@ library(caret)
 library(magrittr)
 library(Matrix)
 library(faraway)
-library(broom)
 ```
 
 
