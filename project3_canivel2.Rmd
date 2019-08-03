@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-```{r eval=FALSE}
+```{r, eval=FALSE}
 library(lubridate)
 library(cluster)
 library(tidyverse)
@@ -23,7 +23,7 @@ library(Matrix)
 ## Read Data
 
 ```{r}
-nrows = 3000000
+nrows = 100000
 fdata = read.csv("./input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
 ```
 
@@ -49,22 +49,25 @@ features_eng = function(data, istrain=TRUE){
   
   if(istrain == TRUE){
     data = data[complete.cases(data),]
-    # Remove Negative Fare and No Passenger
-    data = data[(data$fare_amount > 0) & (data$passenger_count > 0),]
+    # Remove Negative Fare and No Passenger and some places that does not exist
+    data = data[(data$fare_amount > 0 & data$fare_amount <= 500),]
+    data = data[(data$pickup_longitude > -80 && data$pickup_longitude < -70),]
+    data = data[(data$pickup_latitude > 35 && data$pickup_latitude < 45),]
+    data = data[(data$dropoff_longitude > -80 && data$dropoff_longitude < -70),]
+    data = data[(data$dropoff_latitude > 35 && data$dropoff_latitude < 45),]
+    #only if passengers are between 1 and 9
+    data = data[(data$passenger_count > 0 && data$passenger_count < 10),]
   }
-  
   
   # Convert to datetime obj
   data$pickup_datetime = as_datetime(data$pickup_datetime, tz="UTC")
 
-  
-  
   # factorization
   data$year = as.factor(year(data$pickup_datetime))
   data$month = as.factor(month(data$pickup_datetime))
   data$day = as.factor(day(data$pickup_datetime))
   data$weekday = as.factor(weekdays(data$pickup_datetime))
-  print(dim(data))
+
   #factor time of the day
   hour = hour(data$pickup_datetime)
   data$time = as.factor(ifelse(hour < 7, "Overnight", 
@@ -73,7 +76,16 @@ features_eng = function(data, istrain=TRUE){
                                              ifelse(hour < 20, "Evening",
                                                     ifelse(hour < 23, "night", "overnight")
                         )))))
-  print(dim(data))
+  # convert to radius position
+  data$pickup_latitude = (data$pickup_latitude * pi)/180
+  data$dropoff_latitude = (data$dropoff_latitude * pi)/180
+  data$dropoff_longitude = (data$dropoff_longitude * pi)/180
+  data$pickup_longitude = (data$pickup_longitude * pi)/180 
+  data$dropoff_longitude = ifelse(is.na(data$dropoff_longitude) == TRUE, 0,data$dropoff_longitude)
+  data$pickup_longitude = ifelse(is.na(data$pickup_longitude) == TRUE, 0,data$pickup_longitude)
+  data$pickup_latitude = ifelse(is.na(data$pickup_latitude) == TRUE, 0,data$pickup_latitude)
+  data$dropoff_latitude = ifelse(is.na(data$dropoff_latitude) == TRUE, 0,data$dropoff_latitude)
+
   # compare locations
   data$dlat = data$dropoff_latitude - data$pickup_latitude
   data$dlon = data$dropoff_longitude - data$pickup_longitude 
@@ -83,11 +95,12 @@ features_eng = function(data, istrain=TRUE){
   data$hav = sin(data$dlat/2.0)**2 + cos(data$pickup_latitude) * cos(data$dropoff_latitude) * sin(data$dlon/2.0)**2
   data$haversine = round(x = 2 * earth_radius * asin(sqrt(data$hav)), digits = 4)
   print(dim(data))
+  
   #Compute Bearing distance
   data$dlon = data$pickup_longitude - data$dropoff_longitude
   data$bearing = atan2(sin(data$dlon * cos(data$dropoff_latitude)), cos(data$pickup_latitude) * sin(data$dropoff_latitude) - sin(data$pickup_latitude) * cos(data$dropoff_latitude) * cos(data$dlon))
-  print(dim(data))
-  
+
+  #Some point of interest where people most use taxis in NYC
   jfk_coord_lat = (40.639722 * pi)/180
   jfk_coord_long = (-73.778889 * pi)/180
   ewr_coord_lat = (40.6925 * pi)/180
@@ -99,13 +112,17 @@ features_eng = function(data, istrain=TRUE){
   nyc_lat = (40.7141667 * pi)/180
   nyc_long = (-74.0063889 * pi)/180
   
+  #calculate distances radius for the POI
   data$JFK_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, jfk_coord_lat, jfk_coord_long) + sphere_dist(jfk_coord_lat, jfk_coord_long, data$dropoff_latitude, data$dropoff_longitude)
   data$EWR_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, ewr_coord_lat, ewr_coord_long) +  sphere_dist(ewr_coord_lat, ewr_coord_long, data$dropoff_latitude, data$dropoff_longitude)
-  datar$lga_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, lga_coord_lat, lga_coord_long) + sphere_dist(lga_coord_lat, lga_coord_long, data$dropoff_latitude, data$dropoff_longitude) 
+  data$lga_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, lga_coord_lat, lga_coord_long) + sphere_dist(lga_coord_lat, lga_coord_long, data$dropoff_latitude, data$dropoff_longitude) 
   data$sol_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, liberty_statue_lat, liberty_statue_long) + sphere_dist(liberty_statue_lat, liberty_statue_long, data$dropoff_latitude, data$dropoff_longitude)
   data$nyc_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, nyc_lat, nyc_long) + sphere_dist(nyc_lat, nyc_long, data$dropoff_latitude, data$dropoff_longitude)
-
   
+  #remove some columns
+  drops <- c("pickup_datetime")
+  data = data[, !(names(data) %in% drops)]
+  print(dim(data))
   return (data)
   
 }
@@ -135,7 +152,7 @@ fdata = features_eng(data = fdata)
 
 
 ```{r}
-inds = sample.int(nrow(fdata), size=nrow(fdata) * 0.8) 
+inds = sample.int(nrow(fdata), size=nrow(fdata) * 0.9) 
 train = fdata[inds,]
 test = fdata[-inds,]
 dim(train)
@@ -157,7 +174,17 @@ calc_rmse2 = function(model, data){
 ## Multiple Linear Regression
 
 ```{r}
-m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + passenger_count + year + month + day + weekday + time + dlat + dlon + haversine + bearing, train)
+colnames(fdata)
+```
+
+
+
+```{r}
+m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + passenger_count + day + weekday + time + dlat + dlon + haversine + bearing, train)
+```
+
+```{r}
+m_additive_top_xgb = lm(fare_amount ~ haversine * pickup_datetime * dropoff_longitude + dlat + dropoff_latitude + pickup_longitude + bearing + day + weekday + time, train)
 ```
 
 ```{r}
@@ -166,24 +193,19 @@ calc_rmse2(m_additive, test)
 ```
 
 ```{r}
+calc_rmse(m_additive_top_xgb)
+calc_rmse2(m_additive_top_xgb, test)
+```
+
+```{r}
+anova(m_additive_top_xgb, m_additive)
+```
+
+
+```{r}
 #n = length(resid(m_additive))
 #m_add_mod_back_bic = step(m_additive, direction = "backward", k = log(n))
 ```
-
-```{r}
-m_additive2 = lm(fare_amount ~ dropoff_longitude + year + weekday + time + dlat + 
-    haversine + bearing, train)
-```
-
-```{r}
-calc_rmse(m_additive2)
-calc_rmse2(m_additive2, test)
-```
-
-```{r}
-anova(m_additive2, m_additive)
-```
-
 
 ```{r}
 library('faraway')
@@ -202,31 +224,31 @@ test_kaggle = features_eng(data = test_kaggle, FALSE)
 cat("Making submission file...\n")
 
 read.csv("./input/sample_submission.csv") %>%  
-  mutate(fare_amount = predict(m_additive2, test_kaggle)) %>%
-  write_csv("sub_lm_aditive_5.csv")
+  mutate(fare_amount = predict(m_additive_top_xgb, test_kaggle)) %>%
+  write_csv("sub_lm_additive_6.csv")
 ```
 
 ```{r}
 library(xgboost)
 target = fdata$fare_amount
 
-train = train %>% select (- fare_amount)
-test = test %>% select (- fare_amount)
+X_train = train %>% select (- fare_amount)
+X_test = test %>% select (- fare_amount)
 
-dvalid = xgb.DMatrix(data = data.matrix(test), label = target[-inds])
-dtrain = xgb.DMatrix(data = data.matrix(train), label = target[inds])
+dvalid = xgb.DMatrix(data = data.matrix(X_test), label = target[-inds])
+dtrain = xgb.DMatrix(data = data.matrix(X_train), label = target[inds])
 
 p = list(objective = "reg:linear",
           eval_metric = "rmse",
           max_depth = 8 ,
-          eta = .05, #.05
+          eta = .5, #.05
           subsample=1,
           colsample_bytree=0.8,
           num_boost_round=1000,
-          nrounds = 6000)
+          nrounds = 1000)
 
 set.seed(0)
-m_xgb = xgb.train(p, dtrain, p$nrounds, list(val = dvalid), print_every_n = 10, early_stopping_rounds = 100)
+m_xgb = xgb.train(p, dtrain, p$nrounds, list(val = dvalid), print_every_n = 10, early_stopping_rounds = 50)
 ```
 ##XGB Importance
 ```{r}
@@ -234,7 +256,7 @@ xgb.importance(colnames(dtrain), model = m_xgb)
 ```
 
 ```{r}
-save(m_xgb, file = "m_xgb.rda")
+xgb.save(m_xgb, "client/m_xgb_1.model")
 ```
 
 
@@ -244,5 +266,5 @@ cat("Making submission file...\n")
 
 read.csv("./input/sample_submission.csv") %>%  
   mutate(fare_amount = predict(m_xgb, data.matrix(test_kaggle))) %>%
-  write_csv("sub_xgb_1.csv")
+  write_csv("sub_xgb_2.csv")
 ```
