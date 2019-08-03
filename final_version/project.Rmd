@@ -63,6 +63,28 @@ library(faraway)
 ```
 
 
+## Outlier Removal
+
+In the dataset, the continuous variables fare_amount, pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude can assume to be normally distributed. Since linear regression model coefficients are sensitive to outliers in the training data, we will use the boxplot rule to remove observations that has values greater than 1.5IQR away from the medium in each of these variables, which should help make our model generalize to unseen data that would follow a similar normal distribution.
+
+
+```{r}
+fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
+              fdata$pickup_longitude > median(fdata$pickup_longitude - 1.5 * IQR(fdata$pickup_longitude)) &
+              fdata$pickup_latitude < median(fdata$pickup_latitude) + 1.5 * IQR(fdata$pickup_latitude) &
+              fdata$pickup_latitude > median(fdata$pickup_latitude) - 1.5 * IQR(fdata$pickup_latitude),]
+  print(dim(fdata))
+  # Outlier Dropoff locations
+  fdata = fdata[fdata$dropoff_longitude < median(fdata$dropoff_longitude) + 1.5 * IQR(fdata$dropoff_longitude) &
+              fdata$dropoff_longitude > median(fdata$dropoff_longitude - 1.5 * IQR(fdata$dropoff_longitude)) &
+              fdata$dropoff_latitude < median(fdata$dropoff_latitude) + 1.5 * IQR(fdata$dropoff_latitude) &
+              fdata$dropoff_latitude > median(fdata$dropoff_latitude) - 1.5 * IQR(fdata$dropoff_latitude),]
+  print(dim(fdata))
+  # Outlier Fare Amount
+fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
+```
+
+
 ## Feature Engineering
 
 Several features are been created on this step:
@@ -176,49 +198,6 @@ features_eng = function(data, istrain=TRUE){
 fdata = features_eng(data = fdata)
 ```
 
-## Checking for outliers
-
-** Several outliers are still present **
-
-```{r}
-fit_fy = lm(fare_amount ~ year, data = fdata)
-plot(fare_amount ~ year, data = fdata, col = "grey", pch = 20, cex = 1.5,
-     main = "Fare amount by year")
-```
-
-### Outlier Pickup locations 
-
-** Here we are removing the outliers from the locations based on 1.5 * IQR **
-```{r}
-fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
-              fdata$pickup_longitude > median(fdata$pickup_longitude - 1.5 * IQR(fdata$pickup_longitude)) &
-              fdata$pickup_latitude < median(fdata$pickup_latitude) + 1.5 * IQR(fdata$pickup_latitude) &
-              fdata$pickup_latitude > median(fdata$pickup_latitude) - 1.5 * IQR(fdata$pickup_latitude),]
-  print(dim(fdata))
-  # Outlier Dropoff locations
-  fdata = fdata[fdata$dropoff_longitude < median(fdata$dropoff_longitude) + 1.5 * IQR(fdata$dropoff_longitude) &
-              fdata$dropoff_longitude > median(fdata$dropoff_longitude - 1.5 * IQR(fdata$dropoff_longitude)) &
-              fdata$dropoff_latitude < median(fdata$dropoff_latitude) + 1.5 * IQR(fdata$dropoff_latitude) &
-              fdata$dropoff_latitude > median(fdata$dropoff_latitude) - 1.5 * IQR(fdata$dropoff_latitude),]
-  print(dim(fdata))
-  # Outlier Fare Amount
-fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
-```
-
-
-```{r}
-fit_fy = lm(fare_amount ~ year, data = fdata)
-plot(fare_amount ~ year, data = fdata, col = "grey", pch = 20, cex = 1.5,
-     main = "Fare amount by year")
-```
-
-```{r}
-plot(fare_amount ~ weekday, data = fdata,
-     main   = "Fare Amount x weekday",
-     col = "grey", pch = 20, cex = 1.5)
-```
-
-### Looks like the outliers are pretty much handle 
 
 ## Calculate anova test for each dummy variable
 
@@ -272,13 +251,13 @@ calc_rmse2 = function(model, data){
 m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + pickup_longitude + passenger_count + day + weekday + time + dlat + dlon + haversine + bearing, train)
 ```
 
-** Looks like correlation is over control not finding any > 7 **
+** Looks like correlation is over control**
 
 ```{r}
 vif(m_additive)
 ```
 
-**Both RMSE and LOORMSE are close giving a difference between 1.75 and 1.76 dolars **
+**Both RMSE and LOORMSE are close giving a difference between 1.75 and 1.76 dollars **
 
 ```{r}
 calc_rmse(m_additive)
@@ -292,7 +271,8 @@ n = length(resid(m_additive))
 m_add_mod_back_bic = step(m_additive, direction = "both", k = log(n))
 ```
 
-** the model with Step:  AIC=73136.14 was the best one for this amount of data, lets check the results**
+** the model with Step:  AIC=73279.59 was the best one for this amount of data, lets check the results**
+
 
 ```{r}
 m_additive2 = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + 
@@ -300,7 +280,7 @@ m_additive2 = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_lat
     bearing, train)
 ```
 
-** correlation still under control**
+** correlation is under control**
 
 ```{r}
 vif(m_additive2)
@@ -320,7 +300,22 @@ summary(m_additive2)
 anova(m_additive2, m_additive)
 ```
 
-** both models have the same p-value < 2.2e-16, and the comparision the model 1 perform a little better, but not to create a bigger difference **
+** both models have the same p-value < 7.223e-07, and the comparision the model 1 perform a little better, but not to create a bigger difference **
+
+
+
+** Test log transform on response **
+```{r}
+m_additive_log = lm(log(fare_amount) ~ dropoff_longitude + dropoff_latitude + pickup_latitude + 
+    pickup_longitude + passenger_count + weekday + time + haversine + 
+    bearing, train)
+```
+
+```{r}
+# test rmse
+sqrt(sum((test$fare_amount - exp(predict(m_additive_log, test)))^2) / nrow(test))
+```
+** It appears that log transform hurts the performance of the model on the test set **
 
 ## Second model Polynomial
 
@@ -347,6 +342,18 @@ anova(m_additive2, m_int)
 summary(m_int)
 ```
 
+** Test log transform on response **
+```{r}
+m_int_log = lm(log(fare_amount) ~ .^2, train)
+```
+
+```{r}
+# test rmse
+sqrt(sum((test$fare_amount - exp(predict(m_int_log, test)))^2) / nrow(test))
+```
+** It appears that log transform hurts the performance of the model on the test set **
+
+
 
 # Results
 
@@ -358,7 +365,7 @@ We found observations in the dataset that had non-positive fare_amount and passe
 
 In order to make use of the pickup time information, we will create categorical dummy variables by converting the pickup_datetime column into a timestamp object. The variables we chose to create that could be helpful in predicting the fare_amount are the year, month, day of month, day of week and time of the day of each taxi ride pickup. The construction of the first four variables are trivial, for the time dummy variable, we divided the observations into 5 bins: Morning, Noon, Evening, Night and Overnight, this is based on the intuition that there is a general pattern in types of taxi rides people take depending on the time of day, for example people might be taking taxis to go to work in the morning, go to lunch at noon, back home in the evening and to entertainment venues at night.
 
-We conducted ANOVA f-test on for each of these dummy predictor variable to get a feel on their effect on the response. The null hypothesis of each test would be that the mean of the response variable is the same for all levels of the dummy variable, by calculating the p-value and taking an $alpha=0.01$, we found that we could reject the null for the year, month and time dummy variables; the day of month and day of week variables on the other hand might not be siginificant.
+We conducted ANOVA f-test for each of these dummy variable to get a feel on their effect on the response. The null hypothesis of each test would be that the mean of the response variable is the same for all levels of the dummy variable, by calculating the p-value and taking an $alpha=0.05$, we found that we could reject the null for the year, month, day, weekday and time dummy variables; There are statistically significance between the different levels of each of the dummy variable and the response, therefore we used these dummy variables as predictors in the linear regression model. 
 
 We added a different approach, xgboost.Rmd, using XGboost, that clear achive much better results with unseeing  data.
 
