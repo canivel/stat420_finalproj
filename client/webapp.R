@@ -51,7 +51,7 @@ ui = fluidPage(
 # Define server logic to summarize and view selected dataset ----
 server = function(input, output) {
   
-  m_xgb = xgb.load("m_xgb.model")
+  m_xgb = xgb.load("m_xgb_1.model")
   
   observeEvent(input$do, {
     
@@ -87,8 +87,6 @@ server = function(input, output) {
                         dropoff_latitude = f_dropoff_address_lat,
                         passenger_count = input$passenger_count)
   
-      print(test_data)
-      
       output$f_pickup_address = renderText({
         f_pickup_address
       })

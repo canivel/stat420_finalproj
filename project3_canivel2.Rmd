@@ -241,14 +241,14 @@ dtrain = xgb.DMatrix(data = data.matrix(X_train), label = target[inds])
 p = list(objective = "reg:linear",
           eval_metric = "rmse",
           max_depth = 8 ,
-          eta = .5, #.05
+          eta = .05, #.05
           subsample=1,
           colsample_bytree=0.8,
           num_boost_round=1000,
-          nrounds = 1000)
+          nrounds = 6000)
 
 set.seed(0)
-m_xgb = xgb.train(p, dtrain, p$nrounds, list(val = dvalid), print_every_n = 10, early_stopping_rounds = 50)
+m_xgb = xgb.train(p, dtrain, p$nrounds, list(val = dvalid), print_every_n = 10, early_stopping_rounds = 100)
 ```
 ##XGB Importance
 ```{r}
