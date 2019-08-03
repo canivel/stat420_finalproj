@@ -1,16 +1,57 @@
 ---
-title: "project"
-author: "Danilo Canivel(canivel2)"
-date: "7/31/2019"
-output: html_document
+title: "Taxi? Maybe Not: Data Analysis Project"
+author: "Danilo Canivel (canivel2), Joel Zou (joelzou2), Danny Breyfogle (dwb4)"
+date: "STAT 420, Summer 2019, 7/15/2019 - 8/3/2019"
+output:
+  html_document: 
+    toc: yes
+  pdf_document: default
+urlcolor: cyan
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Introduction
 
-```{r eval=FALSE}
+For this project we will be predicting the fare amount (inclusive of tolls) for a taxi ride in New York City given the pickup and dropoff locations. 
+
+This dataset has 6 features:
+
+- `pickup_datetime` (datetime)
+- `pickup_longitude` (numeric)
+- `pickup_latitude` (numeric)
+- `dropoff_longitude` (numeric)
+- `dropoff_latitude` (numeric)
+- `passenger counts` (numeric)
+
+We will be predicting the numeric response `fare_amount`, fitting on a training set, and predicting on a test set. The datasets can be found at: [https://www.kaggle.com/c/new-york-city-taxi-fare-prediction/data](). There are about 55 million observations in the training set, but due to computing limiations, we will only be using `3,000,000` rows. Below are a few observations:
+
+```{r}
+taxi_data = read.csv("input/train.csv", nrows=100)
+head(taxi_data)
+```
+
+This dataset is interesting because taxi and ride-sharing services have become popular over the last few years. Understanding a cost relationship between the two can be useful when deciding to choose one over the other. The goal of this model is to accurately predict fare cost to inform our decisions, shooting for an `RMSE < 2.88`.
+
+## Methods
+
+#### Packages and Dependencies
+
+Run the below code to install packages (if necessary) and import libraries used in this project.
+
+```{r message=FALSE, warning=FALSE, eval=FALSE}
+install.packages("lubridate")
+install.packages("cluster")
+install.packages("tidyverse")
+install.packages("caret")
+install.packages("magrittr")
+install.packages("Matrix")
+install.packages("Faraway")
+```
+
+```{r message=FALSE, warning=FALSE, eval=FALSE}
 library(lubridate)
 library(cluster)
 library(tidyverse)
@@ -19,53 +60,53 @@ library(magrittr)
 library(Matrix)
 ```
 
+#### Reading the Dataset
 
-## Read Data
+Below, we import the first `3,000,000` observations in the training dataset.
 
-```{r}
+```{r eval=FALSE}
 nrows = 3000000
 fdata = read.csv("./input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
 ```
 
-## Feature Engineering
+#### Feature Engineering
 
-```{r}
-earth_radius = 6371 #in kms
+```{r eval=FALSE}
+earth_radius = 6371 # In kms
 
-sphere_dist = function(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon)
-{
-    #Compute distances along lat, lon dimensions
+sphere_dist = function(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon) {
+  
+    # Compute distances along lat, lon dimensions
     dlat = dropoff_lat - pickup_lat
     dlon = dropoff_lon - pickup_lon
     
-    #Compute  distance
-    a = sin(dlat/2.0)**2 + cos(pickup_lat) * cos(dropoff_lat) * sin(dlon/2.0)**2
+    # Compute distance
+    a = sin(dlat / 2.0)**2 + cos(pickup_lat) * cos(dropoff_lat) * sin(dlon / 2.0)**2
     
-    return (2 * earth_radius * asin(sqrt(a)))
-    
+    return(2 * earth_radius * asin(sqrt(a)))
 } 
+```
 
-features_eng = function(data, istrain=TRUE){
+```{r eval=FALSE}
+features_eng = function(data, istrain=TRUE) {
   
-  if(istrain == TRUE){
+  if(istrain == TRUE) {
     data = data[complete.cases(data),]
-    # Remove Negative Fare and No Passenger
+    # Remove negative fare and no passenger
     data = data[(data$fare_amount > 0) & (data$passenger_count > 0),]
   }
-  
   
   # Convert to datetime obj
   data$pickup_datetime = as_datetime(data$pickup_datetime, tz="UTC")
 
-  
-  
-  # factorization
+  # Factorization
   data$year = as.factor(year(data$pickup_datetime))
   data$month = as.factor(month(data$pickup_datetime))
   data$day = as.factor(day(data$pickup_datetime))
   data$weekday = as.factor(weekdays(data$pickup_datetime))
   print(dim(data))
-  #factor time of the day
+  
+  # Factor time of the day
   hour = hour(data$pickup_datetime)
   data$time = as.factor(ifelse(hour < 7, "Overnight", 
                                ifelse(hour < 11, "Morning", 
@@ -74,68 +115,78 @@ features_eng = function(data, istrain=TRUE){
                                                     ifelse(hour < 23, "night", "overnight")
                         )))))
   print(dim(data))
-  # compare locations
+  
+  # Compare locations
   data$dlat = data$dropoff_latitude - data$pickup_latitude
   data$dlon = data$dropoff_longitude - data$pickup_longitude 
   
-  #Compute haversine distance
-  
+  # Compute haversine distance
   data$hav = sin(data$dlat/2.0)**2 + cos(data$pickup_latitude) * cos(data$dropoff_latitude) * sin(data$dlon/2.0)**2
   data$haversine = round(x = 2 * earth_radius * asin(sqrt(data$hav)), digits = 4)
   print(dim(data))
-  #Compute Bearing distance
+  
+  # Compute Bearing distance
   data$dlon = data$pickup_longitude - data$dropoff_longitude
-  data$bearing = atan2(sin(data$dlon * cos(data$dropoff_latitude)), cos(data$pickup_latitude) * sin(data$dropoff_latitude) - sin(data$pickup_latitude) * cos(data$dropoff_latitude) * cos(data$dlon))
+  data$bearing = atan2(sin(data$dlon * cos(data$dropoff_latitude)),
+                       cos(data$pickup_latitude) * sin(data$dropoff_latitude)
+                       - sin(data$pickup_latitude) * cos(data$dropoff_latitude) * cos(data$dlon))
   print(dim(data))
   
-  jfk_coord_lat = (40.639722 * pi)/180
-  jfk_coord_long = (-73.778889 * pi)/180
-  ewr_coord_lat = (40.6925 * pi)/180
-  ewr_coord_long = (-74.168611 * pi)/180
-  lga_coord_lat = (40.77725 * pi)/180
-  lga_coord_long = (-73.872611 * pi)/180
-  liberty_statue_lat = (40.6892 * pi)/180
-  liberty_statue_long = (-74.0445 * pi)/180
-  nyc_lat = (40.7141667 * pi)/180
-  nyc_long = (-74.0063889 * pi)/180
+  jfk_coord_lat = (40.639722 * pi) / 180
+  jfk_coord_long = (-73.778889 * pi) / 180
+  ewr_coord_lat = (40.6925 * pi) / 180
+  ewr_coord_long = (-74.168611 * pi) / 180
+  lga_coord_lat = (40.77725 * pi) / 180
+  lga_coord_long = (-73.872611 * pi) / 180
+  liberty_statue_lat = (40.6892 * pi) / 180
+  liberty_statue_long = (-74.0445 * pi) / 180
+  nyc_lat = (40.7141667 * pi) / 180
+  nyc_long = (-74.0063889 * pi) / 180
   
-  data$JFK_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, jfk_coord_lat, jfk_coord_long) + sphere_dist(jfk_coord_lat, jfk_coord_long, data$dropoff_latitude, data$dropoff_longitude)
-  data$EWR_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, ewr_coord_lat, ewr_coord_long) +  sphere_dist(ewr_coord_lat, ewr_coord_long, data$dropoff_latitude, data$dropoff_longitude)
-  datar$lga_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, lga_coord_lat, lga_coord_long) + sphere_dist(lga_coord_lat, lga_coord_long, data$dropoff_latitude, data$dropoff_longitude) 
-  data$sol_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, liberty_statue_lat, liberty_statue_long) + sphere_dist(liberty_statue_lat, liberty_statue_long, data$dropoff_latitude, data$dropoff_longitude)
-  data$nyc_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, nyc_lat, nyc_long) + sphere_dist(nyc_lat, nyc_long, data$dropoff_latitude, data$dropoff_longitude)
+  data$JFK_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, jfk_coord_lat, jfk_coord_long)
+                  + sphere_dist(jfk_coord_lat, jfk_coord_long, data$dropoff_latitude, data$dropoff_longitude)
+  
+  data$EWR_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, ewr_coord_lat, ewr_coord_long)
+                  + sphere_dist(ewr_coord_lat, ewr_coord_long, data$dropoff_latitude, data$dropoff_longitude)
+  
+  data$lga_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, lga_coord_lat, lga_coord_long)
+                  + sphere_dist(lga_coord_lat, lga_coord_long, data$dropoff_latitude, data$dropoff_longitude) 
+  
+  data$sol_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, liberty_statue_lat, liberty_statue_long)
+                  + sphere_dist(liberty_statue_lat, liberty_statue_long, data$dropoff_latitude, data$dropoff_longitude)
+  
+  data$nyc_dist = sphere_dist(data$pickup_latitude, data$pickup_longitude, nyc_lat, nyc_long)
+                  + sphere_dist(nyc_lat, nyc_long, data$dropoff_latitude, data$dropoff_longitude)
 
-  
-  return (data)
-  
+  return(data)
 }
 ```
 
-```{r}
-fdata = features_eng(data = fdata)
+```{r eval=FALSE}
+fdata = features_eng(data=fdata)
 ```
 
-```{r}
-### Outlier Pickup locations 
-  fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
+```{r eval=FALSE}
+# Outlier pickup locations 
+fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
               fdata$pickup_longitude > median(fdata$pickup_longitude - 1.5 * IQR(fdata$pickup_longitude)) &
               fdata$pickup_latitude < median(fdata$pickup_latitude) + 1.5 * IQR(fdata$pickup_latitude) &
               fdata$pickup_latitude > median(fdata$pickup_latitude) - 1.5 * IQR(fdata$pickup_latitude),]
-  print(dim(fdata))
-  # Outlier Dropoff locations
-  fdata = fdata[fdata$dropoff_longitude < median(fdata$dropoff_longitude) + 1.5 * IQR(fdata$dropoff_longitude) &
+print(dim(fdata))
+
+# Outlier dropoff locations
+fdata = fdata[fdata$dropoff_longitude < median(fdata$dropoff_longitude) + 1.5 * IQR(fdata$dropoff_longitude) &
               fdata$dropoff_longitude > median(fdata$dropoff_longitude - 1.5 * IQR(fdata$dropoff_longitude)) &
               fdata$dropoff_latitude < median(fdata$dropoff_latitude) + 1.5 * IQR(fdata$dropoff_latitude) &
               fdata$dropoff_latitude > median(fdata$dropoff_latitude) - 1.5 * IQR(fdata$dropoff_latitude),]
-  print(dim(fdata))
-  # Outlier Fare Amount
-  fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
+print(dim(fdata))
+
+# Outlier fare amount
+fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
 ```
 
-
-
-```{r}
-inds = sample.int(nrow(fdata), size=nrow(fdata) * 0.8) 
+```{r eval=FALSE}
+inds = sample.int(nrow(fdata), size=nrow(fdata) * 0.8)
 train = fdata[inds,]
 test = fdata[-inds,]
 dim(train)
@@ -143,70 +194,73 @@ dim(test)
 head(train)
 ```
 
-```{r}
+#### Multiple Linear Regression
+
+Below is a simple function to help with calculating `RMSE` for the various models tested:
+
+```{r eval=FALSE}
 calc_rmse = function(model) {
-  sqrt(mean((resid(model) / (1 - hatvalues(model))) ^ 2))
+  sqrt(mean((resid(model) / (1 - hatvalues(model)))^2))
 }
 
-calc_rmse2 = function(model, data){
+calc_rmse2 = function(model, data) {
   sqrt(sum((data$fare_amount - predict(model, newdata=data))^2) / nrow(data))
 }
 ```
 
+First, we construct a basic, additive multiple linear regression model, using the starting features, and those from the feature engineering section.
 
-## Multiple Linear Regression
-
-```{r}
+```{r eval=FALSE}
 m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + passenger_count + year + month + day + weekday + time + dlat + dlon + haversine + bearing, train)
-```
 
-```{r}
 calc_rmse(m_additive)
 calc_rmse2(m_additive, test)
 ```
 
-```{r}
-#n = length(resid(m_additive))
-#m_add_mod_back_bic = step(m_additive, direction = "backward", k = log(n))
+Hoping to find a better performing model, we use a backward BIC search:
+
+```{r eval=FALSE}
+n = length(resid(m_additive))
+m_add_mod_back_bic = step(m_additive, direction="backward", k=log(n))
 ```
 
-```{r}
+We also perfrom an ANOVA test to determine if the model is significant.
+
+```{r eval=FALSE}
 m_additive2 = lm(fare_amount ~ dropoff_longitude + year + weekday + time + dlat + 
     haversine + bearing, train)
-```
 
-```{r}
 calc_rmse(m_additive2)
 calc_rmse2(m_additive2, test)
-```
 
-```{r}
 anova(m_additive2, m_additive)
 ```
 
+Multicollinearity can cause us issues, so we make sure the VIF values are in-line:
 
-```{r}
-library('faraway')
+```{r eval=FALSE}
+library(faraway)
 round(vif(m_additive), 3)
-
 ```
 
+Finally, we predict on the test set and submit to Kaggle, where we will get our `RMSE`.
 
-```{r}
+```{r eval=FALSE}
 test_kaggle = read.csv("./input/test.csv", stringsAsFactors=FALSE)
 test_kaggle = features_eng(data = test_kaggle, FALSE)
-```
 
-```{r}
-#---------------------------
 cat("Making submission file...\n")
 
 read.csv("./input/sample_submission.csv") %>%  
   mutate(fare_amount = predict(m_additive2, test_kaggle)) %>%
   write_csv("sub_lm_aditive_5.csv")
+
+cat("Done")
 ```
 
-```{r}
+#### XGB Model
+
+```{r eval=FALSE}
 library(xgboost)
 target = fdata$fare_amount
 
@@ -228,21 +282,35 @@ p = list(objective = "reg:linear",
 set.seed(0)
 m_xgb = xgb.train(p, dtrain, p$nrounds, list(val = dvalid), print_every_n = 10, early_stopping_rounds = 100)
 ```
-##XGB Importance
-```{r}
-xgb.importance(colnames(dtrain), model = m_xgb)
+
+#### XGB Importance
+
+```{r eval=FALSE}
+xgb.importance(colnames(dtrain), model=m_xgb)
 ```
 
-```{r}
-save(m_xgb, file = "m_xgb.rda")
+```{r eval=FALSE}
+save(m_xgb, file="m_xgb.rda")
 ```
 
-
-```{r}
-#---------------------------
+```{r eval=FALSE}
 cat("Making submission file...\n")
 
 read.csv("./input/sample_submission.csv") %>%  
   mutate(fare_amount = predict(m_xgb, data.matrix(test_kaggle))) %>%
   write_csv("sub_xgb_1.csv")
+
+cat("Done")
 ```
+
+## Results
+
+(results)
+
+## Discussion
+
+(discussion)
+
+## Appendix
+
+(addtl. code)
