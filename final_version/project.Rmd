@@ -44,7 +44,7 @@ The dataset can be found at: [https://www.kaggle.com/c/new-york-city-taxi-fare-p
 ## Read Data
 
 ```{r}
-nrows = 100000
+nrows = 500000
 fdata = read.csv("../input/train.csv", stringsAsFactors=FALSE, nrows=nrows)
 head(fdata)
 ```
@@ -67,6 +67,10 @@ library(faraway)
 
 In the dataset, the continuous variables fare_amount, pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude can assume to be normally distributed. Since linear regression model coefficients are sensitive to outliers in the training data, we will use the boxplot rule to remove observations that has values greater than 1.5IQR away from the medium in each of these variables, which should help make our model generalize to unseen data that would follow a similar normal distribution.
 
+```{r}
+# remove na obs
+fdata = na.omit(fdata)
+```
 
 ```{r}
 fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
@@ -248,7 +252,7 @@ calc_rmse2 = function(model, data){
 ** Let start by doing a simple baseline model and check the results **
 
 ```{r}
-m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + pickup_longitude + passenger_count + day + weekday + time + dlat + dlon + haversine + bearing, train)
+m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + pickup_longitude + passenger_count + year + month + day + weekday + time + dlat + dlon + haversine + bearing, train)
 ```
 
 ** Looks like correlation is over control**
@@ -268,64 +272,60 @@ calc_rmse2(m_additive, test)
 
 ```{r}
 n = length(resid(m_additive))
-m_add_mod_back_bic = step(m_additive, direction = "both", k = log(n))
+m_additive_bic = step(m_additive, direction = "both", k = log(n))
 ```
 
-** the model with Step:  AIC=73279.59 was the best one for this amount of data, lets check the results**
+** the model with Step:  AIC=309509.3 was the best one for this amount of data, lets check the results**
 
-
-```{r}
-m_additive2 = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + 
-    pickup_longitude + passenger_count + weekday + time + haversine + 
-    bearing, train)
-```
 
 ** correlation is under control**
 
 ```{r}
-vif(m_additive2)
+vif(m_additive_bic)
 ```
 
 ** the model perform a little better but not much to be considered**
 ```{r}
-calc_rmse(m_additive2)
-calc_rmse2(m_additive2, test)
+calc_rmse(m_additive_bic)
+calc_rmse2(m_additive_bic, test)
 ```
 
 ** lets check the statistics and the p-value for both additive models**
 
 ```{r}
-summary(m_additive)
-summary(m_additive2)
-anova(m_additive2, m_additive)
+anova(m_additive_bic, m_additive)
 ```
 
-** both models have the same p-value < 7.223e-07, and the comparision the model 1 perform a little better, but not to create a bigger difference **
+** both models have the same p-value < 2.2e-16, and the comparision the model 1 perform a little better, but not to create a bigger difference **
 
 
 
 ** Test log transform on response **
 ```{r}
 m_additive_log = lm(log(fare_amount) ~ dropoff_longitude + dropoff_latitude + pickup_latitude + 
-    pickup_longitude + passenger_count + weekday + time + haversine + 
-    bearing, train)
+    pickup_longitude + passenger_count + year + month + weekday + 
+    time + haversine + bearing, train)
 ```
 
 ```{r}
 # test rmse
 sqrt(sum((test$fare_amount - exp(predict(m_additive_log, test)))^2) / nrow(test))
 ```
-** It appears that log transform hurts the performance of the model on the test set **
+** It appears that log transform hurts the performance of the model on the test set so we will not consider this model**
 
-## Second model Polynomial
+
+* Try interaction of the variables selected *
 
 ```{r}
-m_int = lm(fare_amount ~ .^2, train)
+m_int = lm(fare_amount ~ (dropoff_longitude + dropoff_latitude + pickup_latitude + 
+    pickup_longitude + passenger_count + year + month + weekday + 
+    time + haversine + bearing)^2, train)
 ```
 
 ** we clear see that the results are better, but probably there is some overfit since we are interatcting all the features**
 
 ** the RMSE and LOORMSE  are clear better lowering the amount of errors in dollars by 1.48 - 1.50 **
+
 
 ```{r}
 calc_rmse(m_int)
@@ -333,8 +333,9 @@ calc_rmse2(m_int, test)
 ```
 
 ```{r}
-anova(m_additive2, m_int)
+anova(m_additive_bic, m_int)
 ```
+
 
 ** comparing both the aditive and the interactive, the interactive is much better so we assume it as  the  better model **
 
@@ -342,15 +343,7 @@ anova(m_additive2, m_int)
 summary(m_int)
 ```
 
-** Test log transform on response **
-```{r}
-m_int_log = lm(log(fare_amount) ~ .^2, train)
-```
 
-```{r}
-# test rmse
-sqrt(sum((test$fare_amount - exp(predict(m_int_log, test)))^2) / nrow(test))
-```
 ** It appears that log transform hurts the performance of the model on the test set **
 
 
