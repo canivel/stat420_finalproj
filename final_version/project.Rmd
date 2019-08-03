@@ -11,7 +11,7 @@ urlcolor: cyan
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, include=FALSE)
 ```
 
 # Introduction
@@ -77,6 +77,13 @@ In the dataset, the continuous variables fare_amount, pickup_longitude, pickup_l
 fdata = na.omit(fdata)
 ```
 
+** detecting outliers **
+```{r}
+boxplot(fare_amount ~ as.factor(year(as_datetime(fdata$pickup_datetime, tz="UTC"))), fdata)
+```
+
+
+
 ```{r}
 fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQR( fdata$pickup_longitude) &
               fdata$pickup_longitude > median(fdata$pickup_longitude - 1.5 * IQR(fdata$pickup_longitude)) &
@@ -92,6 +99,12 @@ fdata = fdata[fdata$pickup_longitude < median(fdata$pickup_longitude) + 1.5 * IQ
   # Outlier Fare Amount
 fdata = fdata[fdata$fare_amount < median(fdata$fare_amount) + 1.5 * IQR(fdata$fare_amount),]
 ```
+
+** not as many outliers afterwards **
+```{r}
+boxplot(fare_amount ~ as.factor(year(as_datetime(fdata$pickup_datetime, tz="UTC"))), fdata)
+```
+
 
 
 ## Feature Engineering
