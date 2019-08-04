@@ -1,5 +1,5 @@
 ---
-title: "Final Project Proposal"
+title: "STAT 420 Final Project"
 author: "Danilo Canivel, Joel Zou, Danny Breyfogle"
 date: "08/03/2019"
 output:
@@ -69,7 +69,7 @@ library(faraway)
 
 ## Outlier Removal
 
-In the dataset, the continuous variables fare_amount, pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude can assume to be normally distributed. Since linear regression model coefficients are sensitive to outliers in the training data, we will use the boxplot rule to remove observations that has values greater than 1.5IQR away from the medium in each of these variables, which should help make our model generalize to unseen data that would follow a similar normal distribution.
+In the dataset, the continuous variables `fare_amount`, `pickup_longitude`, `pickup_latitude`, `dropoff_longitude`, `dropoff_latitude` can be assumed to be normally distributed. Since linear regression model coefficients are sensitive to outliers in the training data, we will use the boxplot rule to remove observations that have values greater than 1.5 IQR away from the median in each of these variables, which should help make our model generalize to unseen data that would follow a similar normal distribution.
 
 ```{r}
 # remove na obs
@@ -108,13 +108,13 @@ boxplot(fare_amount ~ as.factor(year(as_datetime(fdata$pickup_datetime, tz="UTC"
 
 ## Feature Engineering
 
-Several features are been created on this step:
-  - First if we are processing for training, we are gonna remove several outliers relate to fare amount, location and passenger count
-  - Next we fatorize some of the features to work as categories
-  - time for example is factorize in 6 different categories
-  - the locations are converted in radius 
-  - We decided to add a few locations where taxis usually take or drop passengers in NYC.
-  - We Compute haversine distance and Bearing distances
+Several features have been created in this step:
+  - First, if we are processing for training, we are going to remove several outliers related to fare amount, location and passenger count.
+  - Next, we factorize some of the features to work as categories
+  - Time, for example, is factored into 6 different categories
+  - The locations are converted to radius
+  - We decide to add a few locations where taxis usually take or drop passengers in NYC
+  - We compute haversine distance and Bearing distances
 
 ```{r}
 earth_radius = 6371 #in kms
@@ -251,7 +251,7 @@ dim(test)
 head(train)
 ```
 
-## seeting the RMSE and LOORMSE functions
+## Setting the RMSE and LOORMSE functions
 
 ```{r}
 calc_rmse = function(model) {
@@ -266,13 +266,13 @@ calc_rmse2 = function(model, data){
 
 ## Multiple Linear Regression
 
-** Let start by doing a simple baseline model and check the results **
+** Lets start by doing a simple baseline model and checking the results **
 
 ```{r}
 m_additive = lm(fare_amount ~ dropoff_longitude + dropoff_latitude + pickup_latitude + pickup_longitude + passenger_count + year + month + day + weekday + time + dlat + dlon + haversine + bearing, train)
 ```
 
-** Looks like correlation is over control**
+** Looks like correlation is out of control**
 
 ```{r}
 vif(m_additive)
@@ -368,9 +368,9 @@ anova(m_additive_bic, m_int)
 
 # Discussion
 
-We found observations in the dataset that had non-positive fare_amount and passenger_count, these are likely due to errors in data entry and would not help generalize our model to predict on new data of interest, thus we remove these observations before further usage. The continuous variables fare_amount, pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude in the dataset can assume to be normally distributed. Since linear regression model coefficients are sensitive to outliers, we will use the boxplot rule to remove observations that has values greater than 1.5IQR away from the medium in each of these variables.
+We found observations in the dataset that had non-positive fare_amount and passenger_count, these are likely due to errors in data entry and would not help generalize our model to predict on new data of interest, thus we remove these observations before further usage. The continuous variables `fare_amount`, `pickup_longitude`, `pickup_latitude`, `dropoff_longitude`, `dropoff_latitude` in the dataset can assume to be normally distributed. Since linear regression model coefficients are sensitive to outliers, we will use the boxplot rule to remove observations that has values greater than 1.5 IQR away from the median in each of these variables.
 
-In order to make use of the pickup time information, we will create categorical dummy variables by converting the pickup_datetime column into a timestamp object. The variables we chose to create that could be helpful in predicting the fare_amount are the year, month, day of month, day of week and time of the day of each taxi ride pickup. The construction of the first four variables are trivial, for the time dummy variable, we divided the observations into 5 bins: Morning, Noon, Evening, Night and Overnight, this is based on the intuition that there is a general pattern in types of taxi rides people take depending on the time of day, for example people might be taking taxis to go to work in the morning, go to lunch at noon, back home in the evening and to entertainment venues at night.
+In order to make use of the pickup time information, we will create categorical dummy variables by converting the `pickup_datetime` column into a timestamp object. The variables we chose to create that could be helpful in predicting the `fare_amount` are the year, month, day of month, day of week and time of the day of each taxi ride pickup. The construction of the first four variables are trivial, for the time dummy variable, we divided the observations into 5 bins: Morning, Noon, Evening, Night and Overnight, this is based on the intuition that there is a general pattern in types of taxi rides people take depending on the time of day, for example people might be taking taxis to go to work in the morning, go to lunch at noon, back home in the evening and to entertainment venues at night.
 
 We conducted ANOVA f-test for each of these dummy variable to get a feel on their effect on the response. The null hypothesis of each test would be that the mean of the response variable is the same for all levels of the dummy variable, by calculating the p-value and taking an $alpha=0.05$, we found that we could reject the null for the year, month, day, weekday and time dummy variables; There are statistically significance between the different levels of each of the dummy variable and the response, therefore we used these dummy variables as predictors in the linear regression model. 
 
